@@ -32,43 +32,12 @@
           <label for="nome">Nome:</label>
           <input type="text" id="nome" placeholder="Nome do agente">
         </div>
-        <div class="campo-box roxo">
-          <label for="classe">Classe:</label>
-          <select id="classe">
-            <option value="">Selecione...</option>
-            <option value="Atacante">Atacante</option>
-            <option value="Conjurador">Conjurador</option>
-            <option value="Perito">Perito</option>
-          </select>
-        </div>
-        <div class="campo-box roxo">
-          <label for="patente">Patente:</label>
-          <select id="patente">
-            <option value="Recruta" selected>Recruta</option>
-            <option value="Operador">Operador</option>
-            <option value="Agente Especial">Agente Especial</option>
-            <option value="Oficial de Operações">Oficial de Operações</option>
-            <option value="Agente de Elite">Agente de Elite</option>
-          </select>
-        </div>
-        <div class="campo-box roxo">
-          <label for="exp">exp0%:</label>
-          <input type="text" id="exp" value="0%">
-        </div>
-        <div class="campo-box roxo">
-          <label for="origem">Origem:</label>
-          <input type="text" id="origem" value="humano">
-        </div>
-        <div class="campo-box roxo">
-          <label for="trilha">Trilha:</label>
-          <input type="text" id="trilha" placeholder="Trilha do agente">
-        </div>
       </div>
 
       <!-- Status, Defesa, Atributos e Afinidade de Nen -->
       <div class="grid-principal">
 
-        <!-- Coluna 1: Vida, Pontos de Esforço e Sanidade -->
+        <!-- Coluna 1: Vida, Pontos de Esforço, Sanidade e Medo -->
         <div class="coluna-status">
           <div class="card">
             <div class="card-header azul">Vida</div>
@@ -108,9 +77,8 @@
               <input type="number" value="0">
             </div>
           </div>
-        </div>
-        
-                  <div class="card">
+
+          <div class="card">
             <div class="card-header azul">Medo</div>
             <div class="status-grid">
               <div><label>Atual</label><input type="number" value="0"></div>
@@ -122,7 +90,7 @@
               <input type="number" value="0">
             </div>
           </div>
-
+        </div>
 
         <!-- Coluna 2: Defesa, Esquiva, Bloqueio, Deslocamento -->
         <div class="coluna-defesa">
@@ -517,7 +485,7 @@
                 <tr>
                   <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                   <td class="pericia-nome">Vontade</td>
-                  <td class="attr-tag">aura</td>
+                  <td class="attr-tag">Aura</td>
                   <td><input type="number" value="0"></td>
                   <td><input type="number" value="0"></td>
                   <td><input type="number" value="0" class="total-cell"></td>
