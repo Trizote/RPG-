@@ -196,8 +196,6 @@ function resolveCurrentSectionByViewport() {
     const visibleBottom = Math.min(rect.bottom, viewportBottom);
     const visibleHeight = Math.max(0, visibleBottom - visibleTop);
 
-    // Prioriza a seção que cruza a linha de leitura logo abaixo do topo,
-    // ou, caso nenhuma esteja cruzando exatamente essa linha, a de maior altura visível.
     const crossesAnchor = rect.top <= anchorLine && rect.bottom > topOffset + 12;
     const score = visibleHeight + (crossesAnchor ? viewportBottom : 0);
 
@@ -296,6 +294,37 @@ function collectSheetData() {
 
   return {
     fields,
+    atualizadoEm: new Date().toISOString()
+  };
+}
+
+function buildSanitizedCloudPayload() {
+  const raw = collectSheetData();
+  const cleanFields = createSafeRecord();
+
+  if (raw && raw.fields && typeof raw.fields === "object") {
+    const entries = Object.entries(raw.fields).slice(0, 1500);
+    for (let i = 0; i < entries.length; i += 1) {
+      const [key, val] = entries[i];
+      if (!isValidFieldKey(key)) continue;
+
+      if (typeof val === "boolean") {
+        cleanFields[key] = val;
+      } else if (typeof val === "number" && Number.isFinite(val)) {
+        cleanFields[key] = String(val).slice(0, 60);
+      } else if (typeof val === "string") {
+        cleanFields[key] =
+          key.startsWith("id:anotacoes") ||
+          key.startsWith("id:hist-") ||
+          key.startsWith("id:proficiencias")
+            ? sanitizeText(val, 5000)
+            : sanitizeSingleLine(val, 250);
+      }
+    }
+  }
+
+  return {
+    fields: cleanFields,
     atualizadoEm: new Date().toISOString()
   };
 }
@@ -433,7 +462,7 @@ async function loadFromFirestore(uid) {
       saveLocalData(cloudData);
       setStatusBanner("Ficha carregada do banco de dados Firebase.", "success");
     } else {
-      const initialData = collectSheetData();
+      const initialData = buildSanitizedCloudPayload();
       await setDoc(docRef, initialData);
       saveLocalData(initialData);
       setStatusBanner("Nova ficha criada na sua conta do Firebase.", "success");
@@ -445,10 +474,13 @@ async function loadFromFirestore(uid) {
 }
 
 async function saveToFirestore(uid, data) {
-  if (!state.firebaseReady || !state.db || !uid) return false;
+  if (!state.firebaseReady || !state.db || !uid || typeof uid !== "string") {
+    return false;
+  }
   const { doc, setDoc } = state.firebaseModules.firestoreMod;
   const docRef = doc(state.db, FIRESTORE_COLLECTION, uid);
-  await setDoc(docRef, data, { merge: true });
+  const safeData = data && data.fields ? data : buildSanitizedCloudPayload();
+  await setDoc(docRef, safeData, { merge: true });
   return true;
 }
 
@@ -565,7 +597,8 @@ async function persistSheet() {
     saveLocalData(payload);
 
     if (state.firebaseReady && state.user) {
-      await saveToFirestore(state.user.uid, payload);
+      const cloudPayload = buildSanitizedCloudPayload();
+      await saveToFirestore(state.user.uid, cloudPayload);
       setStatusBanner("Ficha salva no banco de dados Firebase.", "success");
     } else if (hasCookieConsent()) {
       setStatusBanner("Alterações salvas localmente.", "info");
