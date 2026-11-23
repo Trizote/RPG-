@@ -140,7 +140,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .status-banner[hidden] {
-  display: none;
+  display: none !important;
 }
 
 .status-banner[data-status-type="success"] {
@@ -581,7 +581,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .lgpd-banner[hidden] {
-  display: none;
+  display: none !important;
 }
 
 .lgpd-text {

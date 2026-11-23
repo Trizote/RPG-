@@ -106,6 +106,17 @@ function hasCookieConsent() {
   }
 }
 
+function setLgpdBannerVisibility(shouldHide) {
+  const banner = document.getElementById("lgpd-banner");
+  if (!banner) return;
+  banner.hidden = Boolean(shouldHide);
+  if (shouldHide) {
+    banner.style.setProperty("display", "none", "important");
+  } else {
+    banner.style.removeProperty("display");
+  }
+}
+
 /* --------------------------------------------------------------------------
    Coleta e Aplicação Segura de Dados na Ficha
    -------------------------------------------------------------------------- */
@@ -443,24 +454,22 @@ function updateAuthUI() {
 }
 
 function initLgpdBanner() {
-  const banner = document.getElementById("lgpd-banner");
+  setLgpdBannerVisibility(hasCookieConsent());
+
   const acceptBtn = document.getElementById("lgpd-accept-btn");
-  if (!banner) return;
+  if (!acceptBtn || acceptBtn.dataset.lgpdBound === "1") return;
+  acceptBtn.dataset.lgpdBound = "1";
 
-  banner.hidden = hasCookieConsent();
-
-  if (acceptBtn) {
-    acceptBtn.addEventListener("click", () => {
-      state.cookieConsentAccepted = true;
-      try {
-        localStorage.setItem(STORAGE_KEYS.COOKIE_CONSENT, "accepted");
-      } catch {
-        // Mantém o aceite em memória caso o localStorage esteja bloqueado
-      }
-      banner.hidden = true;
-      saveLocalData(collectSheetData());
-    });
-  }
+  acceptBtn.addEventListener("click", () => {
+    state.cookieConsentAccepted = true;
+    try {
+      localStorage.setItem(STORAGE_KEYS.COOKIE_CONSENT, "accepted");
+    } catch {
+      // Mantém o aceite em memória caso o localStorage esteja bloqueado
+    }
+    setLgpdBannerVisibility(true);
+    saveLocalData(collectSheetData());
+  });
 }
 
 function bindEvents() {
