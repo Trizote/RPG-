@@ -15,6 +15,7 @@
       <a href="#equipamentos-habilidades" class="aba-btn">Equipamentos e Habilidades</a>
       <a href="#historico" class="aba-btn">Histórico</a>
       <a href="#guilda" class="aba-btn">Guilda</a>
+      <a href="#privacidade-lgpd" class="aba-btn">Privacidade (LGPD)</a>
       <button type="button" id="btn-save-sheet" class="aba-btn aba-btn-destaque">Salvar Ficha</button>
     </nav>
   </header>
@@ -812,12 +813,48 @@
       </div>
     </section>
 
+    <!-- ==========================================
+         TRANSPARÊNCIA, RETENÇÃO E LGPD
+    =========================================== -->
+    <section id="privacidade-lgpd" class="secao">
+      <h2 class="titulo-secao">Privacidade, Retenção de Dados e LGPD</h2>
+
+      <div class="card">
+        <div class="card-header roxo">Como suas informações são guardadas e removidas</div>
+        <p class="texto-nen">
+          Em conformidade com a Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018), os dados da ficha e da conta são tratados exclusivamente para salvar, sincronizar e recuperar sua ficha de agente no sistema <strong>Ordem de Arkan</strong>:
+        </p>
+        <p class="texto-nen">
+          <strong>1. Armazenamento na nuvem (Firebase Authentication &amp; Cloud Firestore):</strong> Quando você faz login, sua ficha é sincronizada na nuvem vinculada à sua conta e permanece salva por tempo indeterminado até que você solicite a exclusão da conta ou os dados sejam removidos no Firebase.
+        </p>
+        <p class="texto-nen">
+          <strong>2. Armazenamento local no navegador (localStorage):</strong> Quando você clica em <strong>Entendi e Aceito</strong> no banner LGPD, uma cópia local da ficha e do seu aceite é salva no navegador deste aparelho sem data de expiração automática.
+        </p>
+        <p class="nota-nen">
+          <strong>O que pode apagar ou descartar os dados locais e da conta:</strong>
+          (a) Limpar os dados do site, cache ou armazenamento local no navegador (como o Chrome no celular ou no PC);
+          (b) Usar aba anônima ou navegação privada (onde o armazenamento local costuma ser descartado ao fechar a janela);
+          (c) Clicar em <strong>Excluir conta</strong> e confirmar (o que apaga a conta e os dados da ficha salvos no Firebase e limpa os dados locais deste navegador), ou não clicar em <strong>Entendi e Aceito</strong> no banner LGPD (impedindo a gravação da cópia local no navegador).
+        </p>
+      </div>
+    </section>
+
   </main>
+
+  <!-- Rodapé com informações do criador -->
+  <footer class="rodape">
+    <p>
+      <strong>Ordem de Arkan - Ficha de Agente</strong> — Criado e desenvolvido por <strong>Lucas Ramalho Gavasso Trizote</strong>.
+    </p>
+    <p class="rodape-sub">
+      Armazenamento conforme LGPD (Lei nº 13.709/2018): cópia local mediante aceite no banner LGPD e sincronização na nuvem via Firebase quando autenticado.
+    </p>
+  </footer>
 
   <!-- Aviso LGPD -->
   <aside id="lgpd-banner" class="lgpd-banner" role="region" aria-label="Aviso de privacidade e armazenamento" hidden>
     <p class="lgpd-text">
-      Este site salva suas alterações localmente no navegador e, quando você faz login, sincroniza sua ficha no Firebase.
+      LGPD: Clicar em <strong>Entendi e Aceito</strong> salva uma cópia local da ficha no navegador (sujeita à limpeza de cache/dados do site ou descarte em aba anônima). Quando conectado, a ficha também é salva no Firebase até você <strong>Excluir conta</strong>.
     </p>
     <button type="button" id="lgpd-accept-btn" class="btn-arkan btn-azul">
       Entendi e Aceito

@@ -537,6 +537,25 @@ input:focus, select:focus, textarea:focus {
   flex: 1;
 }
 
+/* Rodapé */
+.rodape {
+  max-width: 1350px;
+  margin: 0 auto 24px;
+  padding: 14px 18px;
+  background-color: #1c1a27;
+  border: 1px solid #333344;
+  border-top: 2px solid #674ea7;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  color: #e4e4ec;
+}
+
+.rodape-sub {
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: #b4b4c7;
+}
+
 /* Banner LGPD */
 .lgpd-banner {
   position: fixed;

@@ -1,7 +1,8 @@
 /* ==========================================================================
    Ordem de Arkan - Ficha de Agente (script.js)
    Segurança front-end (XSS, Prototype Pollution, integridade e console guard)
-   + Firebase Authentication & Cloud Firestore
+   + Firebase Authentication & Cloud Firestore + conformidade LGPD
+   Criador: Lucas Ramalho Gavasso Trizote
    ========================================================================== */
 
 "use strict";
@@ -384,8 +385,10 @@ async function persistSheet() {
     if (state.firebaseReady && state.user) {
       await saveToFirestore(state.user.uid, payload);
       setStatusBanner("Ficha salva no banco de dados Firebase.", "success");
-    } else {
+    } else if (hasCookieConsent()) {
       setStatusBanner("Alterações salvas localmente. Faça login para salvar no Firebase.", "info");
+    } else {
+      setStatusBanner("Aceite o banner LGPD para salvar localmente ou faça login no Firebase.", "info");
     }
   } catch (err) {
     console.error("Erro ao salvar ficha:", err);
