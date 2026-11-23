@@ -32,6 +32,7 @@ const state = {
   db: null,
   firebaseModules: null,
   authMode: "login",
+  cookieConsentAccepted: false,
   saveTimer: null,
   isSaving: false,
   isDeleting: false
@@ -95,8 +96,11 @@ function setStatusBanner(message, type = "info") {
 }
 
 function hasCookieConsent() {
+  if (state.cookieConsentAccepted) return true;
   try {
-    return localStorage.getItem(STORAGE_KEYS.COOKIE_CONSENT) === "accepted";
+    const accepted = localStorage.getItem(STORAGE_KEYS.COOKIE_CONSENT) === "accepted";
+    if (accepted) state.cookieConsentAccepted = true;
+    return accepted;
   } catch {
     return false;
   }
@@ -447,10 +451,11 @@ function initLgpdBanner() {
 
   if (acceptBtn) {
     acceptBtn.addEventListener("click", () => {
+      state.cookieConsentAccepted = true;
       try {
         localStorage.setItem(STORAGE_KEYS.COOKIE_CONSENT, "accepted");
       } catch {
-        // Ignora falha de armazenamento
+        // Mantém o aceite em memória caso o localStorage esteja bloqueado
       }
       banner.hidden = true;
       saveLocalData(collectSheetData());

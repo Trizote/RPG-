@@ -139,6 +139,10 @@ input:focus, select:focus, textarea:focus {
   font-size: 0.9rem;
 }
 
+.status-banner[hidden] {
+  display: none;
+}
+
 .status-banner[data-status-type="success"] {
   border-left-color: #3d85c6;
 }
@@ -574,6 +578,10 @@ input:focus, select:focus, textarea:focus {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.lgpd-banner[hidden] {
+  display: none;
 }
 
 .lgpd-text {
