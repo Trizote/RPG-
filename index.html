@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ordem de Arkan - Ficha de Agente</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="topo">
+    <h1>Ordem de Arkan</h1>
+    <nav class="abas">
+      <a href="#dados-agente" class="aba-btn">Dados do Agente</a>
+      <a href="#equipamentos-habilidades" class="aba-btn">Equipamentos e Habilidades</a>
+      <a href="#historico" class="aba-btn">Histórico</a>
+      <a href="#guilda" class="aba-btn">Guilda</a>
+    </nav>
+  </header>
+
+  <main class="container">
+
+    <!-- ==========================================
+         ABA 1: DADOS DO AGENTE
+    =========================================== -->
+    <section id="dados-agente" class="secao">
+      <h2 class="titulo-secao">Dados do Agente</h2>
+
+      <!-- Cabeçalho de Identificação -->
+      <div class="grid-identificacao">
+        <div class="campo-box roxo">
+          <label for="nome">Nome:</label>
+          <input type="text" id="nome" placeholder="Nome do agente">
+        </div>
+        <div class="campo-box roxo">
+          <label for="classe">Classe:</label>
+          <select id="classe">
+            <option value="">Selecione...</option>
+            <option value="Atacante">Atacante</option>
+            <option value="Conjurador">Conjurador</option>
+            <option value="Perito">Perito</option>
+          </select>
+        </div>
+        <div class="campo-box roxo">
+          <label for="patente">Patente:</label>
+          <select id="patente">
+            <option value="Recruta" selected>Recruta</option>
+            <option value="Operador">Operador</option>
+            <option value="Agente Especial">Agente Especial</option>
+            <option value="Oficial de Operações">Oficial de Operações</option>
+            <option value="Agente de Elite">Agente de Elite</option>
+          </select>
+        </div>
+        <div class="campo-box roxo">
+          <label for="exp">exp0%:</label>
+          <input type="text" id="exp" value="0%">
+        </div>
+        <div class="campo-box roxo">
+          <label for="origem">Origem:</label>
+          <input type="text" id="origem" value="humano">
+        </div>
+        <div class="campo-box roxo">
+          <label for="trilha">Trilha:</label>
+          <input type="text" id="trilha" placeholder="Trilha do agente">
+        </div>
+      </div>
+
+      <!-- Status, Defesa, Atributos e Afinidade de Nen -->
+      <div class="grid-principal">
+
+        <!-- Coluna 1: Vida, Pontos de Esforço e Sanidade -->
+        <div class="coluna-status">
+          <div class="card">
+            <div class="card-header azul">Vida</div>
+            <div class="status-grid">
+              <div><label>Atual</label><input type="number" value="0"></div>
+              <div><label>Dano</label><input type="number" value="0"></div>
+              <div><label>Máximo</label><input type="number" value="0"></div>
+            </div>
+            <div class="status-temp">
+              <label>Temporário:</label>
+              <input type="number" value="0">
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header azul">Pontos de Esforço</div>
+            <div class="status-grid">
+              <div><label>Atual</label><input type="number" value="0"></div>
+              <div><label>Gasto</label><input type="number" value="0"></div>
+              <div><label>Máximo</label><input type="number" value="0"></div>
+            </div>
+            <div class="status-temp">
+              <label>Temporário:</label>
+              <input type="number" value="0">
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header azul">Sanidade</div>
+            <div class="status-grid">
+              <div><label>Atual</label><input type="number" value="0"></div>
+              <div><label>Dano</label><input type="number" value="0"></div>
+              <div><label>Máximo</label><input type="number" value="0"></div>
+            </div>
+            <div class="status-temp">
+              <label>Temporário:</label>
+              <input type="number" value="0">
+            </div>
+          </div>
+        </div>
+        
+                  <div class="card">
+            <div class="card-header azul">Medo</div>
+            <div class="status-grid">
+              <div><label>Atual</label><input type="number" value="0"></div>
+              <div><label>Dano</label><input type="number" value="0"></div>
+              <div><label>Máximo</label><input type="number" value="0"></div>
+            </div>
+            <div class="status-temp">
+              <label>Temporário:</label>
+              <input type="number" value="0">
+            </div>
+          </div>
+
+
+        <!-- Coluna 2: Defesa, Esquiva, Bloqueio, Deslocamento -->
+        <div class="coluna-defesa">
+          <div class="card">
+            <div class="card-header azul">Defesa</div>
+            <div class="defesa-item">
+              <span>Total</span>
+              <input type="number" value="11" class="destaque-num">
+              <label>Outros:</label>
+              <input type="number" value="0">
+            </div>
+            <div class="defesa-item">
+              <span>Esquiva</span>
+              <input type="number" value="11" class="destaque-num">
+              <label>Outros:</label>
+              <input type="number" value="0">
+            </div>
+            <div class="defesa-item">
+              <span>Bloqueio</span>
+              <input type="number" value="0" class="destaque-num">
+              <label>Outros:</label>
+              <input type="number" value="0">
+            </div>
+            <div class="defesa-item">
+              <span>Deslocamento</span>
+              <input type="number" value="9" class="destaque-num">
+              <label>Outros:</label>
+              <input type="number" value="0">
+            </div>
+          </div>
+        </div>
+
+        <!-- Coluna 3: Atributos, Anotações, NV/XP/Rank -->
+        <div class="coluna-atributos">
+          <div class="card">
+            <div class="card-header azul">Atributos</div>
+            <div class="atributos-grid">
+              <div class="attr-box"><label>Agi</label><input type="number" value="1"></div>
+              <div class="attr-box"><label>For</label><input type="number" value="1"></div>
+              <div class="attr-box"><label>CA</label><input type="number" value="1"></div>
+              <div class="attr-box"><label>Int</label><input type="number" value="1"></div>
+              <div class="attr-box"><label>Vig</label><input type="number" value="1"></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header azul">Anotações</div>
+            <textarea rows="5" placeholder="Anotações gerais do agente..."></textarea>
+          </div>
+
+          <div class="card grid-nv">
+            <div><label>NV</label><input type="number" value="1"></div>
+            <div><label>XP</label><input type="number" value="0"></div>
+            <div><label>XP Atual</label><input type="number" value="0"></div>
+            <div class="rank-box"><label>Rank</label><input type="text" value="E"></div>
+          </div>
+        </div>
+
+        <!-- Coluna 4: Afinidade de Nen -->
+        <div class="coluna-nen">
+          <div class="card">
+            <div class="card-header azul">Afinidade de Nen</div>
+
+            <div class="campo-hist">
+              <label for="categoria-principal-nen">Categoria principal:</label>
+              <select id="categoria-principal-nen">
+                <option value="">Selecione a categoria principal...</option>
+                <option value="Reforço">Reforço</option>
+                <option value="Emissão">Emissão</option>
+                <option value="Transformação">Transformação</option>
+                <option value="Materialização">Materialização</option>
+                <option value="Manipulação">Manipulação</option>
+                <option value="Especialização">Especialização</option>
+              </select>
+            </div>
+
+            <p class="texto-nen">
+              O Nen será o coração do sistema. Todo personagem poderá aprender os princípios básicos, mas terá maior facilidade com uma categoria específica.
+            </p>
+            <p class="texto-nen">
+              Cada personagem deverá possuir uma categoria principal. A categoria principal terá 100% de eficiência. As categorias próximas terão eficiências diferentes.
+            </p>
+
+            <div class="subtitulo-nen">Existem seis categorias:</div>
+            <table class="tabela-ficha tabela-nen">
+              <thead>
+                <tr>
+                  <th>Categoria</th>
+                  <th>Especialidade</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Reforço</strong></td>
+                  <td>Aumentar capacidades físicas e resistência</td>
+                </tr>
+                <tr>
+                  <td><strong>Emissão</strong></td>
+                  <td>Projetar aura para longe do corpo</td>
+                </tr>
+                <tr>
+                  <td><strong>Transformação</strong></td>
+                  <td>Alterar as propriedades da aura</td>
+                </tr>
+                <tr>
+                  <td><strong>Materialização</strong></td>
+                  <td>Criar objetos utilizando aura</td>
+                </tr>
+                <tr>
+                  <td><strong>Manipulação</strong></td>
+                  <td>Controlar pessoas, objetos ou criaturas</td>
+                </tr>
+                <tr>
+                  <td><strong>Especialização</strong></td>
+                  <td>Desenvolver habilidades fora das categorias comuns</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div class="subtitulo-nen">Tabela de eficiência de Nen</div>
+            <table class="tabela-ficha tabela-nen">
+              <thead>
+                <tr>
+                  <th>Relação com a categoria principal</th>
+                  <th>Eficiência</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Categoria principal</td>
+                  <td><strong>100%</strong></td>
+                </tr>
+                <tr>
+                  <td>Categoria adjacente</td>
+                  <td><strong>80%</strong></td>
+                </tr>
+                <tr>
+                  <td>Categoria distante</td>
+                  <td><strong>60%</strong></td>
+                </tr>
+                <tr>
+                  <td>Categoria oposta</td>
+                  <td><strong>40%</strong></td>
+                </tr>
+              </tbody>
+            </table>
+
+            <p class="nota-nen">
+              A Especialização é uma exceção: suas regras de aprendizado serão próprias e não poderá ser escolhida livremente como categoria secundária.
+            </p>
+            <p class="texto-nen">
+              A eficiência representa o domínio natural do personagem. Por exemplo, um usuário de Reforço poderá aprender Emissão, mas terá mais dificuldade para dominar técnicas dessa categoria.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Perícias e Ataques -->
+      <div class="grid-pericias-ataques">
+        <!-- Tabela de Perícias -->
+        <div class="card">
+          <div class="card-header roxo-escuro">Perícias</div>
+          <div class="tabela-scroll">
+            <table class="tabela-ficha">
+              <thead>
+                <tr>
+                  <th>Grau</th>
+                  <th>Perícia</th>
+                  <th>Atributo-base</th>
+                  <th>Benefícios</th>
+                  <th>Outros</th>
+                  <th>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Acrobacia</td>
+                  <td class="attr-tag">Agilidade</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Adestramento</td>
+                  <td class="attr-tag">Aura</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Artes /</td>
+                  <td class="attr-tag">Aura</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Atletismo</td>
+                  <td class="attr-tag">Força</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Atualidades</td>
+                  <td class="attr-tag">Intelecto</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Ciências /</td>
+                  <td class="attr-tag">Intelecto</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Crime / * #</td>
+                  <td class="attr-tag">Agilidade</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Diplomacia</td>
+                  <td class="attr-tag">Aura</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Enganação #</td>
+                  <td class="attr-tag">Aura</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Fortitude</td>
+                  <td class="attr-tag">Vigor</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Furtividade *</td>
+                  <td class="attr-tag">Agilidade</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Iniciativa</td>
+                  <td class="attr-tag">Agilidade</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Intimidação</td>
+                  <td class="attr-tag">Aura</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Intuição</td>
+                  <td class="attr-tag">Intelecto</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Investigação</td>
+                  <td class="attr-tag">Intelecto</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Luta</td>
+                  <td class="attr-tag">Força</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Medicina #</td>
+                  <td class="attr-tag">Intelecto</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">NEN</td>
+                  <td class="attr-tag">Aura</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Percepção</td>
+                  <td class="attr-tag">Aura</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Pilotagem /</td>
+                  <td class="attr-tag">Agilidade</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Pontaria</td>
+                  <td class="attr-tag">Agilidade</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Profissão</td>
+                  <td class="attr-tag">Intelecto</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Reflexos</td>
+                  <td class="attr-tag">Agilidade</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Religião</td>
+                  <td class="attr-tag">Intelecto</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Sobrevivência</td>
+                  <td class="attr-tag">Intelecto</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Tática</td>
+                  <td class="attr-tag">Intelecto</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Tecnologia # /</td>
+                  <td class="attr-tag">Intelecto</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+                <tr>
+                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                  <td class="pericia-nome">Vontade</td>
+                  <td class="attr-tag">Presença</td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0" class="total-cell"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="legenda-pericias">
+            <span><strong>/</strong> Somente treinamento</span>
+            <span><strong>*</strong> Penalidade por carga</span>
+            <span><strong>#</strong> Kit de perícia</span>
+          </div>
+        </div>
+
+        <!-- Tabela de Ataques -->
+        <div class="card">
+          <div class="card-header roxo-vivo">Ataques</div>
+          <div class="tabela-scroll">
+            <table class="tabela-ficha">
+              <thead>
+                <tr>
+                  <th>Arma</th>
+                  <th>Tipo</th>
+                  <th>Teste</th>
+                  <th>Alcance</th>
+                  <th>Dano</th>
+                  <th>Crítico</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><input type="text" placeholder="Ex: Espada"></td>
+                  <td><input type="text" placeholder="Corte"></td>
+                  <td><input type="text" placeholder="Luta"></td>
+                  <td><input type="text" placeholder="Curto"></td>
+                  <td><input type="text" placeholder="1d8"></td>
+                  <td><input type="text" placeholder="19/x2"></td>
+                </tr>
+                <tr>
+                  <td><input type="text"></td>
+                  <td><input type="text"></td>
+                  <td><input type="text"></td>
+                  <td><input type="text"></td>
+                  <td><input type="text"></td>
+                  <td><input type="text"></td>
+                </tr>
+                <tr>
+                  <td><input type="text"></td>
+                  <td><input type="text"></td>
+                  <td><input type="text"></td>
+                  <td><input type="text"></td>
+                  <td><input type="text"></td>
+                  <td><input type="text"></td>
+                </tr>
+                <tr>
+                  <td><input type="text"></td>
+                  <td><input type="text"></td>
+                  <td><input type="text"></td>
+                  <td><input type="text"></td>
+                  <td><input type="text"></td>
+                  <td><input type="text"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         ABA 2: EQUIPAMENTOS E HABILIDADES
+    =========================================== -->
+    <section id="equipamentos-habilidades" class="secao">
+      <h2 class="titulo-secao">Equipamentos e Habilidades</h2>
+
+      <div class="grid-equip-hab">
+        <!-- Coluna Equipamentos -->
+        <div class="card">
+          <div class="card-header azul">Equipamentos</div>
+          <div class="barra-carga">
+            <label><input type="checkbox"> Somar intelecto?</label>
+            <div><span>Atual:</span> <input type="number" value="0" class="mini-input"></div>
+            <div><span>ESPAÇOS:</span> <input type="number" value="5" class="mini-input"></div>
+          </div>
+
+          <table class="tabela-categorias">
+            <thead>
+              <tr>
+                <th>0</th>
+                <th>I</th>
+                <th>II</th>
+                <th>III</th>
+                <th>IV</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><input type="number" value="0"></td>
+                <td><input type="number" value="0"></td>
+                <td><input type="number" value="0"></td>
+                <td><input type="number" value="0"></td>
+                <td><input type="number" value="0"></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <table class="tabela-ficha">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Descrição</th>
+                <th>Categoria</th>
+                <th>Espaço</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><input type="text"></td>
+                <td><input type="text"></td>
+                <td><input type="number" value="0"></td>
+                <td><input type="number" value="0"></td>
+              </tr>
+              <tr>
+                <td><input type="text"></td>
+                <td><input type="text"></td>
+                <td><input type="number" value="0"></td>
+                <td><input type="number" value="0"></td>
+              </tr>
+              <tr>
+                <td><input type="text"></td>
+                <td><input type="text"></td>
+                <td><input type="number" value="0"></td>
+                <td><input type="number" value="0"></td>
+              </tr>
+              <tr>
+                <td><input type="text"></td>
+                <td><input type="text"></td>
+                <td><input type="number" value="0"></td>
+                <td><input type="number" value="0"></td>
+              </tr>
+              <tr>
+                <td><input type="text"></td>
+                <td><input type="text"></td>
+                <td><input type="number" value="0"></td>
+                <td><input type="number" value="0"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Coluna Proficiências -->
+        <div class="coluna-hab">
+          <div class="card">
+            <div class="card-header roxo">Proficiências</div>
+            <textarea rows="6" placeholder="Armas simples, proteções leves..."></textarea>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         ABA 3: HISTÓRICO
+    =========================================== -->
+    <section id="historico" class="secao">
+      <h2 class="titulo-secao">Histórico do Agente</h2>
+
+      <div class="grid-historico">
+        <div class="card">
+          <div class="campo-hist"><label>Nome do agente</label><input type="text"></div>
+          <div class="campo-hist"><label>Idade</label><input type="text"></div>
+          <div class="campo-hist"><label>Gênero</label><input type="text"></div>
+          <div class="campo-hist"><label>Altura</label><input type="text"></div>
+          <div class="campo-hist"><label>Peso</label><input type="text"></div>
+          <div class="campo-hist"><label>Local de Nascimento</label><input type="text"></div>
+          <div class="campo-hist"><label>Descrição de aparência</label><textarea rows="4"></textarea></div>
+        </div>
+
+        <div class="card">
+          <div class="campo-hist"><label>Personalidade</label><textarea rows="2"></textarea></div>
+          <div class="campo-hist"><label>Objetivo Pessoal</label><textarea rows="2"></textarea></div>
+          <div class="campo-hist"><label>Vícios e Manias</label><textarea rows="2"></textarea></div>
+          <div class="campo-hist"><label>Medos</label><textarea rows="2"></textarea></div>
+          <div class="campo-hist"><label>Gostos e Hobbies</label><textarea rows="2"></textarea></div>
+          <div class="campo-hist"><label>Comida Favorita</label><input type="text"></div>
+        </div>
+      </div>
+
+      <div class="grid-historico-inferior">
+        <div class="card">
+          <div class="card-header azul">Relacionamentos</div>
+          <table class="tabela-ficha">
+            <thead>
+              <tr>
+                <th>Nome do Personagem/NPC</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><input type="text"></td><td><input type="text"></td></tr>
+              <tr><td><input type="text"></td><td><input type="text"></td></tr>
+              <tr><td><input type="text"></td><td><input type="text"></td></tr>
+              <tr><td><input type="text"></td><td><input type="text"></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="card-header azul">História</div>
+          <textarea rows="8" placeholder="Escreva a história pregressa do agente..."></textarea>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         ABA 4: GUILDA
+    =========================================== -->
+    <section id="guilda" class="secao">
+      <h2 class="titulo-secao">Guilda</h2>
+
+      <div class="grid-guilda">
+        <div class="card">
+          <div class="card-header azul">Históricos de Missões</div>
+          <table class="tabela-ficha">
+            <thead>
+              <tr>
+                <th>Missão</th>
+                <th>XP</th>
+                <th>Moeda</th>
+                <th>Data</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
+              <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
+              <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
+              <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
+            </tbody>
+          </table>
+          <div class="totais-guilda">
+            <div><label>XP totais:</label><input type="number" value="0"></div>
+            <div><label>Moedas totais:</label><input type="number" value="0"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+</body>
+</html>
