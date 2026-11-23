@@ -15,10 +15,78 @@
       <a href="#equipamentos-habilidades" class="aba-btn">Equipamentos e Habilidades</a>
       <a href="#historico" class="aba-btn">Histórico</a>
       <a href="#guilda" class="aba-btn">Guilda</a>
+      <button type="button" id="btn-save-sheet" class="aba-btn aba-btn-destaque">Salvar Ficha</button>
     </nav>
   </header>
 
   <main class="container">
+
+    <div id="status-banner" class="status-banner" role="status" aria-live="polite" hidden></div>
+
+    <!-- Tela de Login / Conta Firebase -->
+    <section id="login-firebase" class="secao">
+      <div class="card">
+        <div class="card-header roxo">Conta &amp; Nuvem (Firebase)</div>
+
+        <div id="auth-logged-out">
+          <form id="auth-form" class="auth-form" novalidate>
+            <div class="grid-auth">
+              <div class="campo-hist">
+                <label for="auth-email">E-mail</label>
+                <input
+                  type="email"
+                  id="auth-email"
+                  name="auth-email"
+                  autocomplete="email"
+                  placeholder="agente@exemplo.com"
+                  required
+                >
+              </div>
+              <div class="campo-hist">
+                <label for="auth-password">Senha</label>
+                <input
+                  type="password"
+                  id="auth-password"
+                  name="auth-password"
+                  autocomplete="current-password"
+                  placeholder="Mínimo de 6 caracteres"
+                  minlength="6"
+                  required
+                >
+              </div>
+            </div>
+
+            <div class="auth-acoes">
+              <button type="submit" id="auth-submit-btn" class="btn-arkan btn-azul">Entrar</button>
+              <button type="button" id="auth-toggle-mode" class="btn-arkan btn-roxo">Criar nova conta</button>
+            </div>
+          </form>
+        </div>
+
+        <div id="auth-logged-in" class="auth-sessao-wrapper" hidden>
+          <div class="auth-sessao">
+            <p class="auth-usuario">
+              Conectado como: <strong id="auth-user-email"></strong>
+            </p>
+            <div class="auth-acoes">
+              <button type="button" id="auth-sync-btn" class="btn-arkan btn-azul">Salvar na nuvem</button>
+              <button type="button" id="auth-logout-btn" class="btn-arkan btn-roxo">Sair</button>
+              <button type="button" id="auth-delete-open-btn" class="btn-arkan btn-perigo">Excluir conta</button>
+            </div>
+          </div>
+
+          <div id="auth-delete-confirm-box" class="auth-delete-box" hidden>
+            <p class="auth-delete-aviso">
+              Tem certeza? Isso apagará permanentemente sua conta e sua ficha salva no Firebase.
+            </p>
+            <div class="auth-acoes">
+              <button type="button" id="auth-delete-confirm-btn" class="btn-arkan btn-perigo">Confirmar exclusão</button>
+              <button type="button" id="auth-delete-cancel-btn" class="btn-arkan btn-roxo">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- ==========================================
          ABA 1: DADOS DO AGENTE
@@ -42,52 +110,52 @@
           <div class="card">
             <div class="card-header azul">Vida</div>
             <div class="status-grid">
-              <div><label>Atual</label><input type="number" value="0"></div>
-              <div><label>Dano</label><input type="number" value="0"></div>
-              <div><label>Máximo</label><input type="number" value="0"></div>
+              <div><label>Atual</label><input type="number" id="vida-atual" value="0"></div>
+              <div><label>Dano</label><input type="number" id="vida-dano" value="0"></div>
+              <div><label>Máximo</label><input type="number" id="vida-max" value="0"></div>
             </div>
             <div class="status-temp">
               <label>Temporário:</label>
-              <input type="number" value="0">
+              <input type="number" id="vida-temp" value="0">
             </div>
           </div>
 
           <div class="card">
             <div class="card-header azul">Pontos de Esforço</div>
             <div class="status-grid">
-              <div><label>Atual</label><input type="number" value="0"></div>
-              <div><label>Gasto</label><input type="number" value="0"></div>
-              <div><label>Máximo</label><input type="number" value="0"></div>
+              <div><label>Atual</label><input type="number" id="pe-atual" value="0"></div>
+              <div><label>Gasto</label><input type="number" id="pe-gasto" value="0"></div>
+              <div><label>Máximo</label><input type="number" id="pe-max" value="0"></div>
             </div>
             <div class="status-temp">
               <label>Temporário:</label>
-              <input type="number" value="0">
+              <input type="number" id="pe-temp" value="0">
             </div>
           </div>
 
           <div class="card">
             <div class="card-header azul">Sanidade</div>
             <div class="status-grid">
-              <div><label>Atual</label><input type="number" value="0"></div>
-              <div><label>Dano</label><input type="number" value="0"></div>
-              <div><label>Máximo</label><input type="number" value="0"></div>
+              <div><label>Atual</label><input type="number" id="san-atual" value="0"></div>
+              <div><label>Dano</label><input type="number" id="san-dano" value="0"></div>
+              <div><label>Máximo</label><input type="number" id="san-max" value="0"></div>
             </div>
             <div class="status-temp">
               <label>Temporário:</label>
-              <input type="number" value="0">
+              <input type="number" id="san-temp" value="0">
             </div>
           </div>
 
           <div class="card">
             <div class="card-header azul">Medo</div>
             <div class="status-grid">
-              <div><label>Atual</label><input type="number" value="0"></div>
-              <div><label>Dano</label><input type="number" value="0"></div>
-              <div><label>Máximo</label><input type="number" value="0"></div>
+              <div><label>Atual</label><input type="number" id="medo-atual" value="0"></div>
+              <div><label>Dano</label><input type="number" id="medo-dano" value="0"></div>
+              <div><label>Máximo</label><input type="number" id="medo-max" value="0"></div>
             </div>
             <div class="status-temp">
               <label>Temporário:</label>
-              <input type="number" value="0">
+              <input type="number" id="medo-temp" value="0">
             </div>
           </div>
         </div>
@@ -98,27 +166,27 @@
             <div class="card-header azul">Defesa</div>
             <div class="defesa-item">
               <span>Total</span>
-              <input type="number" value="11" class="destaque-num">
+              <input type="number" id="def-total" value="11" class="destaque-num">
               <label>Outros:</label>
-              <input type="number" value="0">
+              <input type="number" id="def-total-outros" value="0">
             </div>
             <div class="defesa-item">
               <span>Esquiva</span>
-              <input type="number" value="11" class="destaque-num">
+              <input type="number" id="def-esquiva" value="11" class="destaque-num">
               <label>Outros:</label>
-              <input type="number" value="0">
+              <input type="number" id="def-esquiva-outros" value="0">
             </div>
             <div class="defesa-item">
               <span>Bloqueio</span>
-              <input type="number" value="0" class="destaque-num">
+              <input type="number" id="def-bloqueio" value="0" class="destaque-num">
               <label>Outros:</label>
-              <input type="number" value="0">
+              <input type="number" id="def-bloqueio-outros" value="0">
             </div>
             <div class="defesa-item">
               <span>Deslocamento</span>
-              <input type="number" value="9" class="destaque-num">
+              <input type="number" id="def-deslocamento" value="9" class="destaque-num">
               <label>Outros:</label>
-              <input type="number" value="0">
+              <input type="number" id="def-deslocamento-outros" value="0">
             </div>
           </div>
         </div>
@@ -128,24 +196,24 @@
           <div class="card">
             <div class="card-header azul">Atributos</div>
             <div class="atributos-grid">
-              <div class="attr-box"><label>Agi</label><input type="number" value="1"></div>
-              <div class="attr-box"><label>For</label><input type="number" value="1"></div>
-              <div class="attr-box"><label>CA</label><input type="number" value="1"></div>
-              <div class="attr-box"><label>Int</label><input type="number" value="1"></div>
-              <div class="attr-box"><label>Vig</label><input type="number" value="1"></div>
+              <div class="attr-box"><label>Agi</label><input type="number" id="attr-agi" value="1"></div>
+              <div class="attr-box"><label>For</label><input type="number" id="attr-for" value="1"></div>
+              <div class="attr-box"><label>CA</label><input type="number" id="attr-ca" value="1"></div>
+              <div class="attr-box"><label>Int</label><input type="number" id="attr-int" value="1"></div>
+              <div class="attr-box"><label>Vig</label><input type="number" id="attr-vig" value="1"></div>
             </div>
           </div>
 
           <div class="card">
             <div class="card-header azul">Anotações</div>
-            <textarea rows="5" placeholder="Anotações gerais do agente..."></textarea>
+            <textarea id="anotacoes-gerais" rows="5" placeholder="Anotações gerais do agente..."></textarea>
           </div>
 
           <div class="card grid-nv">
-            <div><label>NV</label><input type="number" value="1"></div>
-            <div><label>XP</label><input type="number" value="0"></div>
-            <div><label>XP Atual</label><input type="number" value="0"></div>
-            <div class="rank-box"><label>Rank</label><input type="text" value="E"></div>
+            <div><label>NV</label><input type="number" id="nv-val" value="1"></div>
+            <div><label>XP</label><input type="number" id="xp-val" value="0"></div>
+            <div><label>XP Atual</label><input type="number" id="xp-atual-val" value="0"></div>
+            <div class="rank-box"><label>Rank</label><input type="text" id="rank-val" value="E"></div>
           </div>
         </div>
 
@@ -258,7 +326,7 @@
         <div class="card">
           <div class="card-header roxo-escuro">Perícias</div>
           <div class="tabela-scroll">
-            <table class="tabela-ficha">
+            <table class="tabela-ficha" id="tabela-pericias">
               <thead>
                 <tr>
                   <th>Grau</th>
@@ -508,7 +576,7 @@
         <div class="card">
           <div class="card-header roxo-vivo">Ataques</div>
           <div class="tabela-scroll">
-            <table class="tabela-ficha">
+            <table class="tabela-ficha" id="tabela-ataques">
               <thead>
                 <tr>
                   <th>Arma</th>
@@ -570,34 +638,36 @@
         <div class="card">
           <div class="card-header azul">Equipamentos</div>
           <div class="barra-carga">
-            <label><input type="checkbox"> Somar intelecto?</label>
-            <div><span>Atual:</span> <input type="number" value="0" class="mini-input"></div>
-            <div><span>ESPAÇOS:</span> <input type="number" value="5" class="mini-input"></div>
+            <label><input type="checkbox" id="somar-intelecto"> Somar intelecto?</label>
+            <div><span>Atual:</span> <input type="number" id="espacos-atual" value="0" class="mini-input"></div>
+            <div><span>ESPAÇOS:</span> <input type="number" id="espacos-max" value="5" class="mini-input"></div>
           </div>
 
-          <table class="tabela-categorias">
-            <thead>
-              <tr>
-                <th>0</th>
-                <th>I</th>
-                <th>II</th>
-                <th>III</th>
-                <th>IV</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><input type="number" value="0"></td>
-                <td><input type="number" value="0"></td>
-                <td><input type="number" value="0"></td>
-                <td><input type="number" value="0"></td>
-                <td><input type="number" value="0"></td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="tabela-scroll">
+            <table class="tabela-categorias" id="tabela-categorias">
+              <thead>
+                <tr>
+                  <th>0</th>
+                  <th>I</th>
+                  <th>II</th>
+                  <th>III</th>
+                  <th>IV</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                  <td><input type="number" value="0"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
           <div class="tabela-scroll">
-            <table class="tabela-ficha">
+            <table class="tabela-ficha" id="tabela-itens">
               <thead>
                 <tr>
                   <th>Item</th>
@@ -646,7 +716,7 @@
         <div class="coluna-hab">
           <div class="card">
             <div class="card-header roxo">Proficiências</div>
-            <textarea rows="6" placeholder="Armas simples, proteções leves..."></textarea>
+            <textarea id="proficiencias-txt" rows="6" placeholder="Armas simples, proteções leves..."></textarea>
           </div>
         </div>
       </div>
@@ -660,47 +730,49 @@
 
       <div class="grid-historico">
         <div class="card">
-          <div class="campo-hist"><label>Nome do agente</label><input type="text"></div>
-          <div class="campo-hist"><label>Idade</label><input type="text"></div>
-          <div class="campo-hist"><label>Gênero</label><input type="text"></div>
-          <div class="campo-hist"><label>Altura</label><input type="text"></div>
-          <div class="campo-hist"><label>Peso</label><input type="text"></div>
-          <div class="campo-hist"><label>Local de Nascimento</label><input type="text"></div>
-          <div class="campo-hist"><label>Descrição de aparência</label><textarea rows="4"></textarea></div>
+          <div class="campo-hist"><label>Nome do agente</label><input type="text" id="hist-nome"></div>
+          <div class="campo-hist"><label>Idade</label><input type="text" id="hist-idade"></div>
+          <div class="campo-hist"><label>Gênero</label><input type="text" id="hist-genero"></div>
+          <div class="campo-hist"><label>Altura</label><input type="text" id="hist-altura"></div>
+          <div class="campo-hist"><label>Peso</label><input type="text" id="hist-peso"></div>
+          <div class="campo-hist"><label>Local de Nascimento</label><input type="text" id="hist-nascimento"></div>
+          <div class="campo-hist"><label>Descrição de aparência</label><textarea id="hist-aparencia" rows="4"></textarea></div>
         </div>
 
         <div class="card">
-          <div class="campo-hist"><label>Personalidade</label><textarea rows="2"></textarea></div>
-          <div class="campo-hist"><label>Objetivo Pessoal</label><textarea rows="2"></textarea></div>
-          <div class="campo-hist"><label>Vícios e Manias</label><textarea rows="2"></textarea></div>
-          <div class="campo-hist"><label>Medos</label><textarea rows="2"></textarea></div>
-          <div class="campo-hist"><label>Gostos e Hobbies</label><textarea rows="2"></textarea></div>
-          <div class="campo-hist"><label>Comida Favorita</label><input type="text"></div>
+          <div class="campo-hist"><label>Personalidade</label><textarea id="hist-personalidade" rows="2"></textarea></div>
+          <div class="campo-hist"><label>Objetivo Pessoal</label><textarea id="hist-objetivo" rows="2"></textarea></div>
+          <div class="campo-hist"><label>Vícios e Manias</label><textarea id="hist-vicios" rows="2"></textarea></div>
+          <div class="campo-hist"><label>Medos</label><textarea id="hist-medos" rows="2"></textarea></div>
+          <div class="campo-hist"><label>Gostos e Hobbies</label><textarea id="hist-hobbies" rows="2"></textarea></div>
+          <div class="campo-hist"><label>Comida Favorita</label><input type="text" id="hist-comida"></div>
         </div>
       </div>
 
       <div class="grid-historico-inferior">
         <div class="card">
           <div class="card-header azul">Relacionamentos</div>
-          <table class="tabela-ficha">
-            <thead>
-              <tr>
-                <th>Nome do Personagem/NPC</th>
-                <th>Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td><input type="text"></td><td><input type="text"></td></tr>
-              <tr><td><input type="text"></td><td><input type="text"></td></tr>
-              <tr><td><input type="text"></td><td><input type="text"></td></tr>
-              <tr><td><input type="text"></td><td><input type="text"></td></tr>
-            </tbody>
-          </table>
+          <div class="tabela-scroll">
+            <table class="tabela-ficha" id="tabela-relacionamentos">
+              <thead>
+                <tr>
+                  <th>Nome do Personagem/NPC</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td><input type="text"></td><td><input type="text"></td></tr>
+                <tr><td><input type="text"></td><td><input type="text"></td></tr>
+                <tr><td><input type="text"></td><td><input type="text"></td></tr>
+                <tr><td><input type="text"></td><td><input type="text"></td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div class="card">
           <div class="card-header azul">História</div>
-          <textarea rows="8" placeholder="Escreva a história pregressa do agente..."></textarea>
+          <textarea id="hist-historia" rows="8" placeholder="Escreva a história pregressa do agente..."></textarea>
         </div>
       </div>
     </section>
@@ -715,7 +787,7 @@
         <div class="card">
           <div class="card-header azul">Históricos de Missões</div>
           <div class="tabela-scroll">
-            <table class="tabela-ficha">
+            <table class="tabela-ficha" id="tabela-missoes">
               <thead>
                 <tr>
                   <th>Missão</th>
@@ -733,8 +805,8 @@
             </table>
           </div>
           <div class="totais-guilda">
-            <div><label>XP totais:</label><input type="number" value="0"></div>
-            <div><label>Moedas totais:</label><input type="number" value="0"></div>
+            <div><label>XP totais:</label><input type="number" id="guilda-xp-total" value="0"></div>
+            <div><label>Moedas totais:</label><input type="number" id="guilda-moedas-total" value="0"></div>
           </div>
         </div>
       </div>
@@ -742,5 +814,16 @@
 
   </main>
 
+  <!-- Aviso LGPD -->
+  <aside id="lgpd-banner" class="lgpd-banner" role="region" aria-label="Aviso de privacidade e armazenamento" hidden>
+    <p class="lgpd-text">
+      Este site salva suas alterações localmente no navegador e, quando você faz login, sincroniza sua ficha no Firebase.
+    </p>
+    <button type="button" id="lgpd-accept-btn" class="btn-arkan btn-azul">
+      Entendi e Aceito
+    </button>
+  </aside>
+
+  <script type="module" src="script.js"></script>
 </body>
 </html>

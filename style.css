@@ -10,6 +10,7 @@ body {
   color: #e4e4ec;
   line-height: 1.4;
   overflow-x: hidden;
+  padding-bottom: 84px;
 }
 
 /* Cabeçalho e Navegação */
@@ -48,11 +49,21 @@ body {
   border-radius: 5px;
   font-size: 0.9rem;
   font-weight: 600;
+  border: none;
+  cursor: pointer;
   transition: background 0.2s;
 }
 
 .aba-btn:hover {
   background-color: #674ea7;
+}
+
+.aba-btn-destaque {
+  background-color: #0b5394;
+}
+
+.aba-btn-destaque:hover {
+  background-color: #3d85c6;
 }
 
 /* Estrutura Principal */
@@ -114,6 +125,102 @@ input, select, textarea {
 input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: #8e7cc3;
+}
+
+/* Faixa de Status e Login Firebase */
+.status-banner {
+  background-color: #1e1e28;
+  border: 1px solid #0b5394;
+  border-left: 4px solid #674ea7;
+  color: #e4e4ec;
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin-bottom: 15px;
+  font-size: 0.9rem;
+}
+
+.status-banner[data-status-type="success"] {
+  border-left-color: #3d85c6;
+}
+
+.status-banner[data-status-type="warning"],
+.status-banner[data-status-type="error"] {
+  border-color: #7b1fa2;
+  border-left-color: #ffd966;
+}
+
+.grid-auth {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.auth-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.auth-sessao {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.auth-usuario {
+  font-size: 0.92rem;
+  color: #e4e4ec;
+}
+
+.auth-delete-box {
+  margin-top: 14px;
+  padding: 12px;
+  background-color: #252532;
+  border: 1px solid #8e2438;
+  border-radius: 6px;
+}
+
+.auth-delete-aviso {
+  font-size: 0.88rem;
+  color: #ea9999;
+}
+
+.btn-arkan {
+  border: none;
+  color: #ffffff;
+  padding: 8px 16px;
+  border-radius: 5px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-azul {
+  background-color: #0b5394;
+}
+
+.btn-azul:hover {
+  background-color: #3d85c6;
+}
+
+.btn-roxo {
+  background-color: #674ea7;
+}
+
+.btn-roxo:hover {
+  background-color: #7b1fa2;
+}
+
+.btn-perigo {
+  background-color: #8e2438;
+}
+
+.btn-perigo:hover {
+  background-color: #b71c1c;
 }
 
 /* Identificação */
@@ -428,4 +535,31 @@ input:focus, select:focus, textarea:focus {
 
 .totais-guilda div {
   flex: 1;
+}
+
+/* Banner LGPD */
+.lgpd-banner {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 120;
+  max-width: 1320px;
+  margin: 0 auto;
+  background-color: #1c1a27;
+  border: 1px solid #674ea7;
+  border-radius: 6px;
+  padding: 12px 15px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lgpd-text {
+  font-size: 0.85rem;
+  color: #e4e4ec;
+  flex: 1;
+  min-width: 220px;
 }
