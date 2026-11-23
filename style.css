@@ -9,6 +9,7 @@ body {
   background-color: #121218;
   color: #e4e4ec;
   line-height: 1.4;
+  overflow-x: hidden;
 }
 
 /* Cabeçalho e Navegação */
@@ -137,11 +138,24 @@ input:focus, select:focus, textarea:focus {
   color: #ffffff;
 }
 
-/* Grid Principal de Status */
+/* Grid Principal de Status — Masonry fluido sem vãos entre cards em qualquer tela/DPI */
 .grid-principal {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 15px;
+  columns: 270px 4;
+  column-gap: 15px;
+  margin-bottom: 15px;
+}
+
+.grid-principal > div {
+  display: contents;
+}
+
+.grid-principal .card {
+  break-inside: avoid;
+  page-break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  display: inline-block;
+  width: 100%;
+  margin-bottom: 15px;
 }
 
 .status-grid {
@@ -173,7 +187,7 @@ input:focus, select:focus, textarea:focus {
 /* Defesa */
 .defesa-item {
   display: grid;
-  grid-template-columns: 1fr 70px 60px 65px;
+  grid-template-columns: minmax(0, 1fr) 64px auto 60px;
   align-items: center;
   gap: 6px;
   margin-bottom: 10px;
@@ -218,6 +232,10 @@ input:focus, select:focus, textarea:focus {
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   text-align: center;
+}
+
+.grid-principal .card.grid-nv {
+  display: inline-grid;
 }
 
 .rank-box input {
