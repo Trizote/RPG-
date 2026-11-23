@@ -117,6 +117,19 @@ function setLgpdBannerVisibility(shouldHide) {
   }
 }
 
+function aceitarLgpdBanner() {
+  state.cookieConsentAccepted = true;
+  try {
+    localStorage.setItem(STORAGE_KEYS.COOKIE_CONSENT, "accepted");
+  } catch {
+    // Mantém o aceite em memória caso o localStorage esteja bloqueado
+  }
+  setLgpdBannerVisibility(true);
+  saveLocalData(collectSheetData());
+}
+
+window.__aceitarLgpdArkan = aceitarLgpdBanner;
+
 /* --------------------------------------------------------------------------
    Coleta e Aplicação Segura de Dados na Ficha
    -------------------------------------------------------------------------- */
@@ -460,16 +473,7 @@ function initLgpdBanner() {
   if (!acceptBtn || acceptBtn.dataset.lgpdBound === "1") return;
   acceptBtn.dataset.lgpdBound = "1";
 
-  acceptBtn.addEventListener("click", () => {
-    state.cookieConsentAccepted = true;
-    try {
-      localStorage.setItem(STORAGE_KEYS.COOKIE_CONSENT, "accepted");
-    } catch {
-      // Mantém o aceite em memória caso o localStorage esteja bloqueado
-    }
-    setLgpdBannerVisibility(true);
-    saveLocalData(collectSheetData());
-  });
+  acceptBtn.addEventListener("click", aceitarLgpdBanner);
 }
 
 function bindEvents() {

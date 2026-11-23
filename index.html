@@ -856,7 +856,12 @@
     <p class="lgpd-text">
       LGPD: Clicar em <strong>Entendi e Aceito</strong> salva uma cópia local da ficha no navegador (sujeita à limpeza de cache/dados do site ou descarte em aba anônima). Quando conectado, a ficha também é salva no Firebase até você <strong>Excluir conta</strong>.
     </p>
-    <button type="button" id="lgpd-accept-btn" class="btn-arkan btn-azul">
+    <button
+      type="button"
+      id="lgpd-accept-btn"
+      class="btn-arkan btn-azul"
+      onclick="window.__aceitarLgpdArkan && window.__aceitarLgpdArkan()"
+    >
       Entendi e Aceito
     </button>
   </aside>
