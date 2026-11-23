@@ -1,7 +1,8 @@
 /* ==========================================================================
    Ordem de Arkan - Ficha de Agente (script.js)
    Segurança front-end (XSS, Prototype Pollution, integridade e console guard)
-   + Firebase Authentication & Cloud Firestore + conformidade LGPD
+   + Firebase Authentication & Cloud Firestore + Sessão Offline/Local temporária
+   + Sincronização precisa das seções no topo conforme a rolagem
    Criador: Lucas Ramalho Gavasso Trizote
    ========================================================================== */
 
@@ -25,14 +26,26 @@ const FORBIDDEN_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 const FIRESTORE_COLLECTION = "fichas_ordem_arkan";
 const FIREBASE_SDK_VERSION = "10.14.1";
 
+const TRACKED_SECTIONS = Object.freeze([
+  { id: "dados-agente", label: "Dados do Agente" },
+  { id: "equipamentos-habilidades", label: "Equipamentos e Habilidades" },
+  { id: "historico", label: "Histórico" },
+  { id: "guilda", label: "Guilda" },
+  { id: "privacidade-lgpd", label: "Privacidade (LGPD)" }
+]);
+
 const state = {
   user: null,
+  offlineMode: false,
   firebaseReady: false,
   auth: null,
   db: null,
   firebaseModules: null,
   authMode: "login",
+  showPassword: false,
   cookieConsentAccepted: false,
+  activeSectionId: "dados-agente",
+  scrollRafId: null,
   saveTimer: null,
   isSaving: false,
   isDeleting: false
@@ -95,6 +108,14 @@ function setStatusBanner(message, type = "info") {
   banner.hidden = !cleanMessage;
 }
 
+function setEntradaStatus(message) {
+  const statusEl = document.getElementById("entrada-status");
+  if (!statusEl) return;
+  const clean = sanitizeSingleLine(message, 220);
+  statusEl.textContent = clean;
+  statusEl.hidden = !clean;
+}
+
 function hasCookieConsent() {
   if (state.cookieConsentAccepted) return true;
   try {
@@ -125,10 +146,121 @@ function aceitarLgpdBanner() {
     // Mantém o aceite em memória caso o localStorage esteja bloqueado
   }
   setLgpdBannerVisibility(true);
-  saveLocalData(collectSheetData());
+  if (!state.offlineMode) {
+    saveLocalData(collectSheetData());
+  }
 }
 
 window.__aceitarLgpdArkan = aceitarLgpdBanner;
+
+/* --------------------------------------------------------------------------
+   Atualização da Seção Ativa no Topo Conforme Rolagem
+   -------------------------------------------------------------------------- */
+function setActiveSectionIndicator(sectionId) {
+  const match = TRACKED_SECTIONS.find((item) => item.id === sectionId) || TRACKED_SECTIONS[0];
+  state.activeSectionId = match.id;
+
+  const indicatorEl = document.getElementById("secao-atual-topo");
+  if (indicatorEl) {
+    indicatorEl.textContent = match.label;
+  }
+
+  const navLinks = document.querySelectorAll(".abas .aba-btn[data-secao-alvo]");
+  navLinks.forEach((link) => {
+    const isCurrent = link.dataset.secaoAlvo === match.id;
+    link.classList.toggle("aba-btn-ativa", isCurrent);
+    if (isCurrent) {
+      link.setAttribute("aria-current", "true");
+    } else {
+      link.removeAttribute("aria-current");
+    }
+  });
+}
+
+function resolveCurrentSectionByViewport() {
+  const topoEl = document.querySelector(".topo");
+  const topOffset = topoEl ? topoEl.getBoundingClientRect().height : 90;
+  const viewportBottom = window.innerHeight;
+  const anchorLine = topOffset + Math.min(140, (viewportBottom - topOffset) * 0.25);
+
+  let bestId = TRACKED_SECTIONS[0].id;
+  let bestScore = -1;
+
+  for (let i = 0; i < TRACKED_SECTIONS.length; i += 1) {
+    const secInfo = TRACKED_SECTIONS[i];
+    const secEl = document.getElementById(secInfo.id);
+    if (!secEl) continue;
+
+    const rect = secEl.getBoundingClientRect();
+    const visibleTop = Math.max(rect.top, topOffset);
+    const visibleBottom = Math.min(rect.bottom, viewportBottom);
+    const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+
+    // Prioriza a seção que cruza a linha de leitura logo abaixo do topo,
+    // ou, caso nenhuma esteja cruzando exatamente essa linha, a de maior altura visível.
+    const crossesAnchor = rect.top <= anchorLine && rect.bottom > topOffset + 12;
+    const score = visibleHeight + (crossesAnchor ? viewportBottom : 0);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestId = secInfo.id;
+    }
+  }
+
+  return bestId;
+}
+
+function syncActiveSectionOnScroll() {
+  const appFicha = document.getElementById("app-ficha");
+  if (!appFicha || appFicha.hidden) return;
+
+  const currentId = resolveCurrentSectionByViewport();
+  if (currentId && currentId !== state.activeSectionId) {
+    setActiveSectionIndicator(currentId);
+  }
+}
+
+function scheduleScrollSectionSync() {
+  if (state.scrollRafId !== null) return;
+  state.scrollRafId = window.requestAnimationFrame(() => {
+    state.scrollRafId = null;
+    syncActiveSectionOnScroll();
+  });
+}
+
+/* --------------------------------------------------------------------------
+   Controle do Ecrã de Entrada (Login Firebase vs. Offline/Local Temporário)
+   -------------------------------------------------------------------------- */
+function updateScreenAccess() {
+  const entradaScreen = document.getElementById("entrada-screen");
+  const appFicha = document.getElementById("app-ficha");
+  const hasSession = Boolean(state.user) || Boolean(state.offlineMode);
+
+  if (entradaScreen) {
+    entradaScreen.hidden = hasSession;
+  }
+  if (appFicha) {
+    appFicha.hidden = !hasSession;
+  }
+
+  if (hasSession) {
+    window.requestAnimationFrame(() => {
+      syncActiveSectionOnScroll();
+    });
+  }
+}
+
+function enterOfflineTemporaryMode() {
+  state.offlineMode = true;
+  setEntradaStatus("");
+  updateAuthUI();
+  updateScreenAccess();
+  setStatusBanner(
+    "Modo offline/local ativo: as informações não ficam salvas se você carregar a página novamente.",
+    "warning"
+  );
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
 
 /* --------------------------------------------------------------------------
    Coleta e Aplicação Segura de Dados na Ficha
@@ -195,6 +327,7 @@ function applySheetData(data) {
 }
 
 function saveLocalData(data) {
+  if (state.offlineMode) return;
   if (!hasCookieConsent()) return;
   try {
     localStorage.setItem(STORAGE_KEYS.LOCAL_SHEET, JSON.stringify(data));
@@ -241,10 +374,7 @@ function hasValidFirebaseConfig(cfg) {
 
 async function initFirebase() {
   if (!hasValidFirebaseConfig(FIREBASE_CONFIG)) {
-    setStatusBanner(
-      "Configure a apiKey no script.js para conectar ao Firebase. Salvando localmente.",
-      "warning"
-    );
+    setEntradaStatus("Firebase não configurado. Use a opção Entrar offline/local.");
     return;
   }
 
@@ -264,7 +394,12 @@ async function initFirebase() {
 
     authMod.onAuthStateChanged(state.auth, async (user) => {
       state.user = user || null;
+      if (user) {
+        state.offlineMode = false;
+        setEntradaStatus("");
+      }
       updateAuthUI();
+      updateScreenAccess();
 
       if (user) {
         if (!state.isDeleting) {
@@ -274,13 +409,13 @@ async function initFirebase() {
           );
           await loadFromFirestore(user.uid);
         }
-      } else if (!state.isDeleting) {
+      } else if (!state.isDeleting && !state.offlineMode) {
         setStatusBanner("Faça login para salvar e carregar sua ficha no Firebase.", "info");
       }
     });
   } catch (err) {
     console.error("Erro ao iniciar Firebase:", err);
-    setStatusBanner("Sem conexão com o Firebase no momento. Dados locais disponíveis.", "warning");
+    setEntradaStatus("Sem conexão com o Firebase no momento. Você pode entrar offline/local.");
   }
 }
 
@@ -320,7 +455,7 @@ async function saveToFirestore(uid, data) {
 async function handleAuthSubmit(event) {
   event.preventDefault();
   if (!state.firebaseReady || !state.auth) {
-    setStatusBanner("Firebase ainda não foi inicializado.", "warning");
+    setEntradaStatus("Firebase ainda não foi inicializado.");
     return;
   }
 
@@ -330,36 +465,43 @@ async function handleAuthSubmit(event) {
   const password = passEl ? passEl.value : "";
 
   if (!email || password.length < 6) {
-    setStatusBanner("Preencha um e-mail válido e uma senha com pelo menos 6 caracteres.", "warning");
+    setEntradaStatus("Preencha um e-mail válido e uma senha com pelo menos 6 caracteres.");
     return;
   }
 
   const { signInWithEmailAndPassword, createUserWithEmailAndPassword } = state.firebaseModules.authMod;
 
   try {
-    setStatusBanner(state.authMode === "register" ? "Criando conta..." : "Entrando...", "info");
+    setEntradaStatus(state.authMode === "register" ? "Criando conta..." : "Entrando...");
     if (state.authMode === "register") {
       await createUserWithEmailAndPassword(state.auth, email, password);
     } else {
       await signInWithEmailAndPassword(state.auth, email, password);
     }
     if (passEl) passEl.value = "";
+    state.showPassword = false;
+    updatePasswordVisibilityUI();
   } catch (err) {
     console.error("Falha na autenticação:", err);
-    setStatusBanner("Não foi possível autenticar. Confira e-mail, senha e o método E-mail/Senha no Firebase.", "error");
+    setEntradaStatus("Não foi possível autenticar. Confira e-mail, senha e o método E-mail/Senha no Firebase.");
   }
 }
 
 async function handleLogout() {
-  if (!state.firebaseReady || !state.auth) return;
-  try {
-    const { signOut } = state.firebaseModules.authMod;
-    await signOut(state.auth);
-    setStatusBanner("Você saiu da conta Firebase.", "info");
-  } catch (err) {
-    console.error("Erro ao sair:", err);
-    setStatusBanner("Erro ao encerrar a sessão.", "error");
+  state.offlineMode = false;
+  if (state.firebaseReady && state.auth && state.user) {
+    try {
+      const { signOut } = state.firebaseModules.authMod;
+      await signOut(state.auth);
+    } catch (err) {
+      console.error("Erro ao sair:", err);
+      setStatusBanner("Erro ao encerrar a sessão.", "error");
+      return;
+    }
   }
+  updateAuthUI();
+  updateScreenAccess();
+  setEntradaStatus("Você saiu da sessão. Escolha como deseja entrar novamente.");
 }
 
 async function handleDeleteAccount() {
@@ -382,11 +524,14 @@ async function handleDeleteAccount() {
 
     await deleteUser(currentUser);
     clearLocalData();
+    state.offlineMode = false;
 
     const confirmBox = document.getElementById("auth-delete-confirm-box");
     if (confirmBox) confirmBox.hidden = true;
 
-    setStatusBanner("Conta e ficha excluídas permanentemente do Firebase.", "success");
+    updateAuthUI();
+    updateScreenAccess();
+    setEntradaStatus("Conta e ficha excluídas permanentemente do Firebase.");
   } catch (err) {
     console.error("Erro ao excluir conta:", err);
     if (err && err.code === "auth/requires-recent-login") {
@@ -408,13 +553,22 @@ async function persistSheet() {
 
   try {
     const payload = collectSheetData();
+
+    if (state.offlineMode && !state.user) {
+      setStatusBanner(
+        "Modo offline/local: alterações não ficam salvas se você carregar a página novamente.",
+        "warning"
+      );
+      return;
+    }
+
     saveLocalData(payload);
 
     if (state.firebaseReady && state.user) {
       await saveToFirestore(state.user.uid, payload);
       setStatusBanner("Ficha salva no banco de dados Firebase.", "success");
     } else if (hasCookieConsent()) {
-      setStatusBanner("Alterações salvas localmente. Faça login para salvar no Firebase.", "info");
+      setStatusBanner("Alterações salvas localmente.", "info");
     } else {
       setStatusBanner("Aceite o banner LGPD para salvar localmente ou faça login no Firebase.", "info");
     }
@@ -436,9 +590,28 @@ function scheduleAutoSave() {
 /* --------------------------------------------------------------------------
    Interface e Eventos
    -------------------------------------------------------------------------- */
+function updatePasswordVisibilityUI() {
+  const passEl = document.getElementById("auth-password");
+  const togglePassBtn = document.getElementById("auth-toggle-password");
+  const visible = Boolean(state.showPassword);
+
+  if (passEl) {
+    passEl.type = visible ? "text" : "password";
+  }
+
+  if (togglePassBtn) {
+    togglePassBtn.setAttribute("aria-pressed", visible ? "true" : "false");
+    togglePassBtn.setAttribute(
+      "aria-label",
+      visible ? "Ocultar senha enquanto digita" : "Mostrar senha enquanto digita"
+    );
+    togglePassBtn.textContent = visible ? "Ocultar" : "Mostrar";
+  }
+}
+
 function updateAuthUI() {
-  const loggedOutBox = document.getElementById("auth-logged-out");
   const loggedInBox = document.getElementById("auth-logged-in");
+  const offlineBox = document.getElementById("offline-session-box");
   const userEmailEl = document.getElementById("auth-user-email");
   const submitBtn = document.getElementById("auth-submit-btn");
   const toggleBtn = document.getElementById("auth-toggle-mode");
@@ -446,23 +619,31 @@ function updateAuthUI() {
 
   if (confirmBox) confirmBox.hidden = true;
 
+  renderSafeText(
+    submitBtn,
+    state.authMode === "register" ? "Cadastrar" : "Entrar",
+    40
+  );
+  renderSafeText(
+    toggleBtn,
+    state.authMode === "register" ? "Já tenho conta (Entrar)" : "Criar nova conta",
+    60
+  );
+
   if (state.user) {
-    if (loggedOutBox) loggedOutBox.hidden = true;
     if (loggedInBox) loggedInBox.hidden = false;
+    if (offlineBox) offlineBox.hidden = true;
+    state.showPassword = false;
+    updatePasswordVisibilityUI();
     renderSafeText(userEmailEl, state.user.email || "Conta ativa", 160);
-  } else {
-    if (loggedOutBox) loggedOutBox.hidden = false;
+  } else if (state.offlineMode) {
     if (loggedInBox) loggedInBox.hidden = true;
-    renderSafeText(
-      submitBtn,
-      state.authMode === "register" ? "Cadastrar" : "Entrar",
-      40
-    );
-    renderSafeText(
-      toggleBtn,
-      state.authMode === "register" ? "Já tenho conta (Entrar)" : "Criar nova conta",
-      60
-    );
+    if (offlineBox) offlineBox.hidden = false;
+    updatePasswordVisibilityUI();
+  } else {
+    if (loggedInBox) loggedInBox.hidden = true;
+    if (offlineBox) offlineBox.hidden = true;
+    updatePasswordVisibilityUI();
   }
 }
 
@@ -477,6 +658,50 @@ function initLgpdBanner() {
 }
 
 function bindEvents() {
+  window.addEventListener("scroll", scheduleScrollSectionSync, { passive: true });
+  window.addEventListener("resize", scheduleScrollSectionSync, { passive: true });
+
+  const navLinks = document.querySelectorAll(".abas .aba-btn[data-secao-alvo]");
+  navLinks.forEach((link) => {
+    link.addEventListener("click", () => {
+      const targetId = link.dataset.secaoAlvo;
+      if (targetId) {
+        setActiveSectionIndicator(targetId);
+      }
+      window.setTimeout(syncActiveSectionOnScroll, 320);
+    });
+  });
+
+  const offlineBtn = document.getElementById("btn-entrar-offline");
+  if (offlineBtn) {
+    offlineBtn.addEventListener("click", enterOfflineTemporaryMode);
+  }
+
+  const voltarEntradaBtn = document.getElementById("btn-voltar-entrada");
+  if (voltarEntradaBtn) {
+    voltarEntradaBtn.addEventListener("click", handleLogout);
+  }
+
+  const irLoginNuvemBtn = document.getElementById("btn-ir-login-nuvem");
+  if (irLoginNuvemBtn) {
+    irLoginNuvemBtn.addEventListener("click", () => {
+      state.offlineMode = false;
+      updateAuthUI();
+      updateScreenAccess();
+      setEntradaStatus("Entre com sua conta Firebase para salvar na nuvem.");
+    });
+  }
+
+  const togglePassBtn = document.getElementById("auth-toggle-password");
+  if (togglePassBtn) {
+    togglePassBtn.addEventListener("click", () => {
+      state.showPassword = !state.showPassword;
+      updatePasswordVisibilityUI();
+      const passEl = document.getElementById("auth-password");
+      if (passEl) passEl.focus();
+    });
+  }
+
   const authForm = document.getElementById("auth-form");
   if (authForm) {
     authForm.addEventListener("submit", handleAuthSubmit);
@@ -546,7 +771,9 @@ document.addEventListener("DOMContentLoaded", () => {
     applySheetData(localData);
   }
 
+  setActiveSectionIndicator("dados-agente");
   updateAuthUI();
+  updateScreenAccess();
   bindEvents();
   initFirebase();
 });

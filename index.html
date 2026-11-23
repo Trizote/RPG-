@@ -8,43 +8,45 @@
 </head>
 <body>
 
-  <header class="topo">
-    <h1>Ordem de Arkan</h1>
-    <nav class="abas">
-      <a href="#dados-agente" class="aba-btn">Dados do Agente</a>
-      <a href="#equipamentos-habilidades" class="aba-btn">Equipamentos e Habilidades</a>
-      <a href="#historico" class="aba-btn">Histórico</a>
-      <a href="#guilda" class="aba-btn">Guilda</a>
-      <a href="#privacidade-lgpd" class="aba-btn">Privacidade (LGPD)</a>
-      <button type="button" id="btn-save-sheet" class="aba-btn aba-btn-destaque">Salvar Ficha</button>
-    </nav>
-  </header>
+  <!-- Ecrã de Entrada Dedicado: Login Firebase ou Sessão Offline/Local Temporária -->
+  <div id="entrada-screen" class="entrada-screen" role="dialog" aria-modal="true" aria-labelledby="entrada-titulo">
+    <header class="entrada-topo-3d" aria-hidden="false">
+      <div class="entrada-3d-palco">
+        <p class="entrada-kicker entrada-kicker-topo">Portal de Agentes</p>
+        <h1 id="entrada-titulo" class="entrada-titulo-3d">Ordem de Arkan</h1>
+      </div>
+    </header>
 
-  <main class="container">
+    <div class="entrada-box">
+      <p class="entrada-subtitulo">
+        Escolha como deseja acessar sua ficha de agente antes de abrir o sistema.
+      </p>
 
-    <div id="status-banner" class="status-banner" role="status" aria-live="polite" hidden></div>
+      <div id="entrada-status" class="entrada-status" role="status" aria-live="polite" hidden></div>
 
-    <!-- Tela de Login / Conta Firebase -->
-    <section id="login-firebase" class="secao">
-      <div class="card">
-        <div class="card-header roxo">Conta &amp; Nuvem (Firebase)</div>
+      <div class="entrada-opcoes">
+        <!-- Opção 1: Login / Cadastro Firebase -->
+        <div class="entrada-card">
+          <div class="card-header roxo">1. Login na Nuvem (Firebase)</div>
+          <p class="entrada-desc">
+            Acesse ou crie sua conta para salvar e sincronizar sua ficha na nuvem.
+          </p>
 
-        <div id="auth-logged-out">
           <form id="auth-form" class="auth-form" novalidate>
-            <div class="grid-auth">
-              <div class="campo-hist">
-                <label for="auth-email">E-mail</label>
-                <input
-                  type="email"
-                  id="auth-email"
-                  name="auth-email"
-                  autocomplete="email"
-                  placeholder="agente@exemplo.com"
-                  required
-                >
-              </div>
-              <div class="campo-hist">
-                <label for="auth-password">Senha</label>
+            <div class="campo-hist">
+              <label for="auth-email">E-mail</label>
+              <input
+                type="email"
+                id="auth-email"
+                name="auth-email"
+                autocomplete="email"
+                placeholder="agente@exemplo.com"
+                required
+              >
+            </div>
+            <div class="campo-hist">
+              <label for="auth-password">Senha</label>
+              <div class="senha-grupo">
                 <input
                   type="password"
                   id="auth-password"
@@ -54,6 +56,15 @@
                   minlength="6"
                   required
                 >
+                <button
+                  type="button"
+                  id="auth-toggle-password"
+                  class="btn-senha-vis"
+                  aria-pressed="false"
+                  aria-label="Mostrar senha enquanto digita"
+                >
+                  Mostrar
+                </button>
               </div>
             </div>
 
@@ -64,807 +75,871 @@
           </form>
         </div>
 
-        <div id="auth-logged-in" class="auth-sessao-wrapper" hidden>
-          <div class="auth-sessao">
-            <p class="auth-usuario">
-              Conectado como: <strong id="auth-user-email"></strong>
-            </p>
-            <div class="auth-acoes">
-              <button type="button" id="auth-sync-btn" class="btn-arkan btn-azul">Salvar na nuvem</button>
-              <button type="button" id="auth-logout-btn" class="btn-arkan btn-roxo">Sair</button>
-              <button type="button" id="auth-delete-open-btn" class="btn-arkan btn-perigo">Excluir conta</button>
-            </div>
-          </div>
-
-          <div id="auth-delete-confirm-box" class="auth-delete-box" hidden>
-            <p class="auth-delete-aviso">
-              Tem certeza? Isso apagará permanentemente sua conta e sua ficha salva no Firebase.
-            </p>
-            <div class="auth-acoes">
-              <button type="button" id="auth-delete-confirm-btn" class="btn-arkan btn-perigo">Confirmar exclusão</button>
-              <button type="button" id="auth-delete-cancel-btn" class="btn-arkan btn-roxo">Cancelar</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ==========================================
-         ABA 1: DADOS DO AGENTE
-    =========================================== -->
-    <section id="dados-agente" class="secao">
-      <h2 class="titulo-secao">Dados do Agente</h2>
-
-      <!-- Cabeçalho de Identificação -->
-      <div class="grid-identificacao">
-        <div class="campo-box roxo">
-          <label for="nome">Nome:</label>
-          <input type="text" id="nome" placeholder="Nome do agente">
+        <!-- Opção 2: Entrar Offline / Local (sem persistência ao recarregar) -->
+        <div class="entrada-card entrada-card-offline">
+          <div class="card-header azul">2. Entrar Offline / Local</div>
+          <p class="entrada-desc">
+            Abra a ficha imediatamente sem conta para testes ou uso offline.
+          </p>
+          <p class="entrada-aviso-recarga">
+            <strong>Atenção:</strong> neste modo offline/local, as informações preenchidas <strong>não ficam salvas se você carregar a página novamente</strong>.
+          </p>
+          <button type="button" id="btn-entrar-offline" class="btn-arkan btn-roxo entrada-btn-full">
+            Entrar offline/local (não salva ao recarregar)
+          </button>
         </div>
       </div>
 
-      <!-- Status, Defesa, Atributos e Afinidade de Nen -->
-      <div class="grid-principal">
+      <p class="entrada-rodape">
+        Desenvolvido por <strong>Lucas Ramalho Gavasso Trizote</strong> · Conforme LGPD (Lei nº 13.709/2018).
+      </p>
+    </div>
+  </div>
 
-        <!-- Coluna 1: Vida, Pontos de Esforço, Sanidade e Medo -->
-        <div class="coluna-status">
-          <div class="card">
-            <div class="card-header azul">Vida</div>
-            <div class="status-grid">
-              <div><label>Atual</label><input type="number" id="vida-atual" value="0"></div>
-              <div><label>Dano</label><input type="number" id="vida-dano" value="0"></div>
-              <div><label>Máximo</label><input type="number" id="vida-max" value="0"></div>
+  <!-- Sistema Principal da Ficha (exibido após login ou entrada offline/local) -->
+  <div id="app-ficha" class="app-ficha" hidden>
+    <header class="topo">
+      <div class="topo-cabecalho">
+        <h1>Ordem de Arkan</h1>
+        <div class="secao-ativa-indicador" aria-live="polite">
+          <span>Seção:</span>
+          <strong id="secao-atual-topo">Dados do Agente</strong>
+        </div>
+      </div>
+      <nav class="abas" aria-label="Navegação das seções da ficha">
+        <a href="#dados-agente" class="aba-btn aba-btn-ativa" data-secao-alvo="dados-agente">Dados do Agente</a>
+        <a href="#equipamentos-habilidades" class="aba-btn" data-secao-alvo="equipamentos-habilidades">Equipamentos e Habilidades</a>
+        <a href="#historico" class="aba-btn" data-secao-alvo="historico">Histórico</a>
+        <a href="#guilda" class="aba-btn" data-secao-alvo="guilda">Guilda</a>
+        <a href="#privacidade-lgpd" class="aba-btn" data-secao-alvo="privacidade-lgpd">Privacidade (LGPD)</a>
+        <button type="button" id="btn-save-sheet" class="aba-btn aba-btn-destaque">Salvar Ficha</button>
+        <button type="button" id="btn-voltar-entrada" class="aba-btn">Trocar Acesso / Sair</button>
+      </nav>
+    </header>
+
+    <main class="container">
+
+      <div id="status-banner" class="status-banner" role="status" aria-live="polite" hidden></div>
+
+      <!-- Painel de Sessão Ativa (Firebase ou Offline/Local) -->
+      <section id="login-firebase" class="secao">
+        <div class="card">
+          <div class="card-header roxo">Sessão &amp; Nuvem (Firebase)</div>
+
+          <div id="auth-logged-in" class="auth-sessao-wrapper" hidden>
+            <div class="auth-sessao">
+              <p class="auth-usuario">
+                Conectado como: <strong id="auth-user-email"></strong>
+              </p>
+              <div class="auth-acoes">
+                <button type="button" id="auth-sync-btn" class="btn-arkan btn-azul">Salvar na nuvem</button>
+                <button type="button" id="auth-logout-btn" class="btn-arkan btn-roxo">Sair</button>
+                <button type="button" id="auth-delete-open-btn" class="btn-arkan btn-perigo">Excluir conta</button>
+              </div>
             </div>
-            <div class="status-temp">
-              <label>Temporário:</label>
-              <input type="number" id="vida-temp" value="0">
+
+            <div id="auth-delete-confirm-box" class="auth-delete-box" hidden>
+              <p class="auth-delete-aviso">
+                Tem certeza? Isso apagará permanentemente sua conta e sua ficha salva no Firebase.
+              </p>
+              <div class="auth-acoes">
+                <button type="button" id="auth-delete-confirm-btn" class="btn-arkan btn-perigo">Confirmar exclusão</button>
+                <button type="button" id="auth-delete-cancel-btn" class="btn-arkan btn-roxo">Cancelar</button>
+              </div>
             </div>
           </div>
 
-          <div class="card">
-            <div class="card-header azul">Pontos de Esforço</div>
-            <div class="status-grid">
-              <div><label>Atual</label><input type="number" id="pe-atual" value="0"></div>
-              <div><label>Gasto</label><input type="number" id="pe-gasto" value="0"></div>
-              <div><label>Máximo</label><input type="number" id="pe-max" value="0"></div>
+          <div id="offline-session-box" class="auth-sessao-wrapper" hidden>
+            <div class="auth-sessao">
+              <p class="auth-usuario">
+                Modo ativo: <strong>Offline / Local</strong> — as informações <strong>não ficam salvas se você carregar a página novamente</strong>.
+              </p>
+              <div class="auth-acoes">
+                <button type="button" id="btn-ir-login-nuvem" class="btn-arkan btn-azul">Entrar com conta Firebase</button>
+              </div>
             </div>
-            <div class="status-temp">
-              <label>Temporário:</label>
-              <input type="number" id="pe-temp" value="0">
+          </div>
+        </div>
+      </section>
+
+      <!-- ==========================================
+           ABA 1: DADOS DO AGENTE
+      =========================================== -->
+      <section id="dados-agente" class="secao">
+        <h2 class="titulo-secao">Dados do Agente</h2>
+
+        <!-- Cabeçalho de Identificação -->
+        <div class="grid-identificacao">
+          <div class="campo-box roxo">
+            <label for="nome">Nome:</label>
+            <input type="text" id="nome" placeholder="Nome do agente">
+          </div>
+        </div>
+
+        <!-- Status, Defesa, Atributos e Afinidade de Nen -->
+        <div class="grid-principal">
+
+          <!-- Coluna 1: Vida, Pontos de Esforço, Sanidade e Medo -->
+          <div class="coluna-status">
+            <div class="card">
+              <div class="card-header azul">Vida</div>
+              <div class="status-grid">
+                <div><label>Atual</label><input type="number" id="vida-atual" value="0"></div>
+                <div><label>Dano</label><input type="number" id="vida-dano" value="0"></div>
+                <div><label>Máximo</label><input type="number" id="vida-max" value="0"></div>
+              </div>
+              <div class="status-temp">
+                <label>Temporário:</label>
+                <input type="number" id="vida-temp" value="0">
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header azul">Pontos de Esforço</div>
+              <div class="status-grid">
+                <div><label>Atual</label><input type="number" id="pe-atual" value="0"></div>
+                <div><label>Gasto</label><input type="number" id="pe-gasto" value="0"></div>
+                <div><label>Máximo</label><input type="number" id="pe-max" value="0"></div>
+              </div>
+              <div class="status-temp">
+                <label>Temporário:</label>
+                <input type="number" id="pe-temp" value="0">
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header azul">Sanidade</div>
+              <div class="status-grid">
+                <div><label>Atual</label><input type="number" id="san-atual" value="0"></div>
+                <div><label>Dano</label><input type="number" id="san-dano" value="0"></div>
+                <div><label>Máximo</label><input type="number" id="san-max" value="0"></div>
+              </div>
+              <div class="status-temp">
+                <label>Temporário:</label>
+                <input type="number" id="san-temp" value="0">
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header azul">Medo</div>
+              <div class="status-grid">
+                <div><label>Atual</label><input type="number" id="medo-atual" value="0"></div>
+                <div><label>Dano</label><input type="number" id="medo-dano" value="0"></div>
+                <div><label>Máximo</label><input type="number" id="medo-max" value="0"></div>
+              </div>
+              <div class="status-temp">
+                <label>Temporário:</label>
+                <input type="number" id="medo-temp" value="0">
+              </div>
             </div>
           </div>
 
-          <div class="card">
-            <div class="card-header azul">Sanidade</div>
-            <div class="status-grid">
-              <div><label>Atual</label><input type="number" id="san-atual" value="0"></div>
-              <div><label>Dano</label><input type="number" id="san-dano" value="0"></div>
-              <div><label>Máximo</label><input type="number" id="san-max" value="0"></div>
-            </div>
-            <div class="status-temp">
-              <label>Temporário:</label>
-              <input type="number" id="san-temp" value="0">
+          <!-- Coluna 2: Defesa, Esquiva, Bloqueio, Deslocamento -->
+          <div class="coluna-defesa">
+            <div class="card">
+              <div class="card-header azul">Defesa</div>
+              <div class="defesa-item">
+                <span>Total</span>
+                <input type="number" id="def-total" value="11" class="destaque-num">
+                <label>Outros:</label>
+                <input type="number" id="def-total-outros" value="0">
+              </div>
+              <div class="defesa-item">
+                <span>Esquiva</span>
+                <input type="number" id="def-esquiva" value="11" class="destaque-num">
+                <label>Outros:</label>
+                <input type="number" id="def-esquiva-outros" value="0">
+              </div>
+              <div class="defesa-item">
+                <span>Bloqueio</span>
+                <input type="number" id="def-bloqueio" value="0" class="destaque-num">
+                <label>Outros:</label>
+                <input type="number" id="def-bloqueio-outros" value="0">
+              </div>
+              <div class="defesa-item">
+                <span>Deslocamento</span>
+                <input type="number" id="def-deslocamento" value="9" class="destaque-num">
+                <label>Outros:</label>
+                <input type="number" id="def-deslocamento-outros" value="0">
+              </div>
             </div>
           </div>
 
-          <div class="card">
-            <div class="card-header azul">Medo</div>
-            <div class="status-grid">
-              <div><label>Atual</label><input type="number" id="medo-atual" value="0"></div>
-              <div><label>Dano</label><input type="number" id="medo-dano" value="0"></div>
-              <div><label>Máximo</label><input type="number" id="medo-max" value="0"></div>
+          <!-- Coluna 3: Atributos, Anotações, NV/XP/Rank -->
+          <div class="coluna-atributos">
+            <div class="card">
+              <div class="card-header azul">Atributos</div>
+              <div class="atributos-grid">
+                <div class="attr-box"><label>Agi</label><input type="number" id="attr-agi" value="1"></div>
+                <div class="attr-box"><label>For</label><input type="number" id="attr-for" value="1"></div>
+                <div class="attr-box"><label>CA</label><input type="number" id="attr-ca" value="1"></div>
+                <div class="attr-box"><label>Int</label><input type="number" id="attr-int" value="1"></div>
+                <div class="attr-box"><label>Vig</label><input type="number" id="attr-vig" value="1"></div>
+              </div>
             </div>
-            <div class="status-temp">
-              <label>Temporário:</label>
-              <input type="number" id="medo-temp" value="0">
+
+            <div class="card">
+              <div class="card-header azul">Anotações</div>
+              <textarea id="anotacoes-gerais" rows="5" placeholder="Anotações gerais do agente..."></textarea>
+            </div>
+
+            <div class="card grid-nv">
+              <div><label>NV</label><input type="number" id="nv-val" value="1"></div>
+              <div><label>XP</label><input type="number" id="xp-val" value="0"></div>
+              <div><label>XP Atual</label><input type="number" id="xp-atual-val" value="0"></div>
+              <div class="rank-box"><label>Rank</label><input type="text" id="rank-val" value="E"></div>
+            </div>
+          </div>
+
+          <!-- Coluna 4: Afinidade de Nen -->
+          <div class="coluna-nen">
+            <div class="card">
+              <div class="card-header azul">Afinidade de Nen</div>
+
+              <div class="campo-hist">
+                <label for="categoria-principal-nen">Categoria principal:</label>
+                <select id="categoria-principal-nen">
+                  <option value="">Selecione a categoria principal...</option>
+                  <option value="Reforço">Reforço</option>
+                  <option value="Emissão">Emissão</option>
+                  <option value="Transformação">Transformação</option>
+                  <option value="Materialização">Materialização</option>
+                  <option value="Manipulação">Manipulação</option>
+                  <option value="Especialização">Especialização</option>
+                </select>
+              </div>
+
+              <p class="texto-nen">
+                O Nen será o coração do sistema. Todo personagem poderá aprender os princípios básicos, mas terá maior facilidade com uma categoria específica.
+              </p>
+              <p class="texto-nen">
+                Cada personagem deverá possuir uma categoria principal. A categoria principal terá 100% de eficiência. As categorias próximas terão eficiências diferentes.
+              </p>
+
+              <div class="subtitulo-nen">Existem seis categorias:</div>
+              <div class="tabela-scroll">
+                <table class="tabela-ficha tabela-nen">
+                  <thead>
+                    <tr>
+                      <th>Categoria</th>
+                      <th>Especialidade</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><strong>Reforço</strong></td>
+                      <td>Aumentar capacidades físicas e resistência</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Emissão</strong></td>
+                      <td>Projetar aura para longe do corpo</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Transformação</strong></td>
+                      <td>Alterar as propriedades da aura</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Materialização</strong></td>
+                      <td>Criar objetos utilizando aura</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Manipulação</strong></td>
+                      <td>Controlar pessoas, objetos ou criaturas</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Especialização</strong></td>
+                      <td>Desenvolver habilidades fora das categorias comuns</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="subtitulo-nen">Tabela de eficiência de Nen</div>
+              <div class="tabela-scroll">
+                <table class="tabela-ficha tabela-nen">
+                  <thead>
+                    <tr>
+                      <th>Relação com a categoria principal</th>
+                      <th>Eficiência</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Categoria principal</td>
+                      <td><strong>100%</strong></td>
+                    </tr>
+                    <tr>
+                      <td>Categoria adjacente</td>
+                      <td><strong>80%</strong></td>
+                    </tr>
+                    <tr>
+                      <td>Categoria distante</td>
+                      <td><strong>60%</strong></td>
+                    </tr>
+                    <tr>
+                      <td>Categoria oposta</td>
+                      <td><strong>40%</strong></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <p class="nota-nen">
+                A Especialização é uma exceção: suas regras de aprendizado serão próprias e não poderá ser escolhida livremente como categoria secundária.
+              </p>
+              <p class="texto-nen">
+                A eficiência representa o domínio natural do personagem. Por exemplo, um usuário de Reforço poderá aprender Emissão, mas terá mais dificuldade para dominar técnicas dessa categoria.
+              </p>
             </div>
           </div>
         </div>
 
-        <!-- Coluna 2: Defesa, Esquiva, Bloqueio, Deslocamento -->
-        <div class="coluna-defesa">
+        <!-- Perícias e Ataques -->
+        <div class="grid-pericias-ataques">
+          <!-- Tabela de Perícias -->
           <div class="card">
-            <div class="card-header azul">Defesa</div>
-            <div class="defesa-item">
-              <span>Total</span>
-              <input type="number" id="def-total" value="11" class="destaque-num">
-              <label>Outros:</label>
-              <input type="number" id="def-total-outros" value="0">
-            </div>
-            <div class="defesa-item">
-              <span>Esquiva</span>
-              <input type="number" id="def-esquiva" value="11" class="destaque-num">
-              <label>Outros:</label>
-              <input type="number" id="def-esquiva-outros" value="0">
-            </div>
-            <div class="defesa-item">
-              <span>Bloqueio</span>
-              <input type="number" id="def-bloqueio" value="0" class="destaque-num">
-              <label>Outros:</label>
-              <input type="number" id="def-bloqueio-outros" value="0">
-            </div>
-            <div class="defesa-item">
-              <span>Deslocamento</span>
-              <input type="number" id="def-deslocamento" value="9" class="destaque-num">
-              <label>Outros:</label>
-              <input type="number" id="def-deslocamento-outros" value="0">
-            </div>
-          </div>
-        </div>
-
-        <!-- Coluna 3: Atributos, Anotações, NV/XP/Rank -->
-        <div class="coluna-atributos">
-          <div class="card">
-            <div class="card-header azul">Atributos</div>
-            <div class="atributos-grid">
-              <div class="attr-box"><label>Agi</label><input type="number" id="attr-agi" value="1"></div>
-              <div class="attr-box"><label>For</label><input type="number" id="attr-for" value="1"></div>
-              <div class="attr-box"><label>CA</label><input type="number" id="attr-ca" value="1"></div>
-              <div class="attr-box"><label>Int</label><input type="number" id="attr-int" value="1"></div>
-              <div class="attr-box"><label>Vig</label><input type="number" id="attr-vig" value="1"></div>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header azul">Anotações</div>
-            <textarea id="anotacoes-gerais" rows="5" placeholder="Anotações gerais do agente..."></textarea>
-          </div>
-
-          <div class="card grid-nv">
-            <div><label>NV</label><input type="number" id="nv-val" value="1"></div>
-            <div><label>XP</label><input type="number" id="xp-val" value="0"></div>
-            <div><label>XP Atual</label><input type="number" id="xp-atual-val" value="0"></div>
-            <div class="rank-box"><label>Rank</label><input type="text" id="rank-val" value="E"></div>
-          </div>
-        </div>
-
-        <!-- Coluna 4: Afinidade de Nen -->
-        <div class="coluna-nen">
-          <div class="card">
-            <div class="card-header azul">Afinidade de Nen</div>
-
-            <div class="campo-hist">
-              <label for="categoria-principal-nen">Categoria principal:</label>
-              <select id="categoria-principal-nen">
-                <option value="">Selecione a categoria principal...</option>
-                <option value="Reforço">Reforço</option>
-                <option value="Emissão">Emissão</option>
-                <option value="Transformação">Transformação</option>
-                <option value="Materialização">Materialização</option>
-                <option value="Manipulação">Manipulação</option>
-                <option value="Especialização">Especialização</option>
-              </select>
-            </div>
-
-            <p class="texto-nen">
-              O Nen será o coração do sistema. Todo personagem poderá aprender os princípios básicos, mas terá maior facilidade com uma categoria específica.
-            </p>
-            <p class="texto-nen">
-              Cada personagem deverá possuir uma categoria principal. A categoria principal terá 100% de eficiência. As categorias próximas terão eficiências diferentes.
-            </p>
-
-            <div class="subtitulo-nen">Existem seis categorias:</div>
+            <div class="card-header roxo-escuro">Perícias</div>
             <div class="tabela-scroll">
-              <table class="tabela-ficha tabela-nen">
+              <table class="tabela-ficha" id="tabela-pericias">
                 <thead>
                   <tr>
+                    <th>Grau</th>
+                    <th>Perícia</th>
+                    <th>Atributo-base</th>
+                    <th>Benefícios</th>
+                    <th>Outros</th>
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Acrobacia</td>
+                    <td class="attr-tag">Agilidade</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Adestramento</td>
+                    <td class="attr-tag">Aura</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Artes /</td>
+                    <td class="attr-tag">Aura</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Atletismo</td>
+                    <td class="attr-tag">Força</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Atualidades</td>
+                    <td class="attr-tag">Intelecto</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Ciências /</td>
+                    <td class="attr-tag">Intelecto</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Crime / * #</td>
+                    <td class="attr-tag">Agilidade</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Diplomacia</td>
+                    <td class="attr-tag">Aura</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Enganação #</td>
+                    <td class="attr-tag">Aura</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Fortitude</td>
+                    <td class="attr-tag">Vigor</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Furtividade *</td>
+                    <td class="attr-tag">Agilidade</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Iniciativa</td>
+                    <td class="attr-tag">Agilidade</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Intimidação</td>
+                    <td class="attr-tag">Aura</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Intuição</td>
+                    <td class="attr-tag">Intelecto</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Investigação</td>
+                    <td class="attr-tag">Intelecto</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Luta</td>
+                    <td class="attr-tag">Força</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Medicina #</td>
+                    <td class="attr-tag">Intelecto</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">NEN</td>
+                    <td class="attr-tag">Aura</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Percepção</td>
+                    <td class="attr-tag">Aura</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Pilotagem /</td>
+                    <td class="attr-tag">Agilidade</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Pontaria</td>
+                    <td class="attr-tag">Agilidade</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Profissão</td>
+                    <td class="attr-tag">Intelecto</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Reflexos</td>
+                    <td class="attr-tag">Agilidade</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Religião</td>
+                    <td class="attr-tag">Intelecto</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Sobrevivência</td>
+                    <td class="attr-tag">Intelecto</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Tática</td>
+                    <td class="attr-tag">Intelecto</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Tecnologia # /</td>
+                    <td class="attr-tag">Intelecto</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                  <tr>
+                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td class="pericia-nome">Vontade</td>
+                    <td class="attr-tag">Aura</td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" class="total-cell"></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="legenda-pericias">
+              <span><strong>/</strong> Somente treinamento</span>
+              <span><strong>*</strong> Penalidade por carga</span>
+              <span><strong>#</strong> Kit de perícia</span>
+            </div>
+          </div>
+
+          <!-- Tabela de Ataques -->
+          <div class="card">
+            <div class="card-header roxo-vivo">Ataques</div>
+            <div class="tabela-scroll">
+              <table class="tabela-ficha" id="tabela-ataques">
+                <thead>
+                  <tr>
+                    <th>Arma</th>
+                    <th>Tipo</th>
+                    <th>Teste</th>
+                    <th>Alcance</th>
+                    <th>Dano</th>
+                    <th>Crítico</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><input type="text" placeholder="Ex: Espada"></td>
+                    <td><input type="text" placeholder="Corte"></td>
+                    <td><input type="text" placeholder="Luta"></td>
+                    <td><input type="text" placeholder="Curto"></td>
+                    <td><input type="text" placeholder="1d8"></td>
+                    <td><input type="text" placeholder="19/x2"></td>
+                  </tr>
+                  <tr>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                  </tr>
+                  <tr>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                  </tr>
+                  <tr>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==========================================
+           ABA 2: EQUIPAMENTOS E HABILIDADES
+      =========================================== -->
+      <section id="equipamentos-habilidades" class="secao">
+        <h2 class="titulo-secao">Equipamentos e Habilidades</h2>
+
+        <div class="grid-equip-hab">
+          <!-- Coluna Equipamentos -->
+          <div class="card">
+            <div class="card-header azul">Equipamentos</div>
+            <div class="barra-carga">
+              <label><input type="checkbox" id="somar-intelecto"> Somar intelecto?</label>
+              <div><span>Atual:</span> <input type="number" id="espacos-atual" value="0" class="mini-input"></div>
+              <div><span>ESPAÇOS:</span> <input type="number" id="espacos-max" value="5" class="mini-input"></div>
+            </div>
+
+            <div class="tabela-scroll">
+              <table class="tabela-categorias" id="tabela-categorias">
+                <thead>
+                  <tr>
+                    <th>0</th>
+                    <th>I</th>
+                    <th>II</th>
+                    <th>III</th>
+                    <th>IV</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="tabela-scroll">
+              <table class="tabela-ficha" id="tabela-itens">
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>Descrição</th>
                     <th>Categoria</th>
-                    <th>Especialidade</th>
+                    <th>Espaço</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
-                    <td><strong>Reforço</strong></td>
-                    <td>Aumentar capacidades físicas e resistência</td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
                   </tr>
                   <tr>
-                    <td><strong>Emissão</strong></td>
-                    <td>Projetar aura para longe do corpo</td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
                   </tr>
                   <tr>
-                    <td><strong>Transformação</strong></td>
-                    <td>Alterar as propriedades da aura</td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
                   </tr>
                   <tr>
-                    <td><strong>Materialização</strong></td>
-                    <td>Criar objetos utilizando aura</td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
                   </tr>
                   <tr>
-                    <td><strong>Manipulação</strong></td>
-                    <td>Controlar pessoas, objetos ou criaturas</td>
-                  </tr>
-                  <tr>
-                    <td><strong>Especialização</strong></td>
-                    <td>Desenvolver habilidades fora das categorias comuns</td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0"></td>
                   </tr>
                 </tbody>
               </table>
             </div>
+          </div>
 
-            <div class="subtitulo-nen">Tabela de eficiência de Nen</div>
+          <!-- Coluna Proficiências -->
+          <div class="coluna-hab">
+            <div class="card">
+              <div class="card-header roxo">Proficiências</div>
+              <textarea id="proficiencias-txt" rows="6" placeholder="Armas simples, proteções leves..."></textarea>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==========================================
+           ABA 3: HISTÓRICO
+      =========================================== -->
+      <section id="historico" class="secao">
+        <h2 class="titulo-secao">Histórico do Agente</h2>
+
+        <div class="grid-historico">
+          <div class="card">
+            <div class="campo-hist"><label>Nome do agente</label><input type="text" id="hist-nome"></div>
+            <div class="campo-hist"><label>Idade</label><input type="text" id="hist-idade"></div>
+            <div class="campo-hist"><label>Gênero</label><input type="text" id="hist-genero"></div>
+            <div class="campo-hist"><label>Altura</label><input type="text" id="hist-altura"></div>
+            <div class="campo-hist"><label>Peso</label><input type="text" id="hist-peso"></div>
+            <div class="campo-hist"><label>Local de Nascimento</label><input type="text" id="hist-nascimento"></div>
+            <div class="campo-hist"><label>Descrição de aparência</label><textarea id="hist-aparencia" rows="4"></textarea></div>
+          </div>
+
+          <div class="card">
+            <div class="campo-hist"><label>Personalidade</label><textarea id="hist-personalidade" rows="2"></textarea></div>
+            <div class="campo-hist"><label>Objetivo Pessoal</label><textarea id="hist-objetivo" rows="2"></textarea></div>
+            <div class="campo-hist"><label>Vícios e Manias</label><textarea id="hist-vicios" rows="2"></textarea></div>
+            <div class="campo-hist"><label>Medos</label><textarea id="hist-medos" rows="2"></textarea></div>
+            <div class="campo-hist"><label>Gostos e Hobbies</label><textarea id="hist-hobbies" rows="2"></textarea></div>
+            <div class="campo-hist"><label>Comida Favorita</label><input type="text" id="hist-comida"></div>
+          </div>
+        </div>
+
+        <div class="grid-historico-inferior">
+          <div class="card">
+            <div class="card-header azul">Relacionamentos</div>
             <div class="tabela-scroll">
-              <table class="tabela-ficha tabela-nen">
+              <table class="tabela-ficha" id="tabela-relacionamentos">
                 <thead>
                   <tr>
-                    <th>Relação com a categoria principal</th>
-                    <th>Eficiência</th>
+                    <th>Nome do Personagem/NPC</th>
+                    <th>Estado</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td>Categoria principal</td>
-                    <td><strong>100%</strong></td>
-                  </tr>
-                  <tr>
-                    <td>Categoria adjacente</td>
-                    <td><strong>80%</strong></td>
-                  </tr>
-                  <tr>
-                    <td>Categoria distante</td>
-                    <td><strong>60%</strong></td>
-                  </tr>
-                  <tr>
-                    <td>Categoria oposta</td>
-                    <td><strong>40%</strong></td>
-                  </tr>
+                  <tr><td><input type="text"></td><td><input type="text"></td></tr>
+                  <tr><td><input type="text"></td><td><input type="text"></td></tr>
+                  <tr><td><input type="text"></td><td><input type="text"></td></tr>
+                  <tr><td><input type="text"></td><td><input type="text"></td></tr>
                 </tbody>
               </table>
             </div>
-
-            <p class="nota-nen">
-              A Especialização é uma exceção: suas regras de aprendizado serão próprias e não poderá ser escolhida livremente como categoria secundária.
-            </p>
-            <p class="texto-nen">
-              A eficiência representa o domínio natural do personagem. Por exemplo, um usuário de Reforço poderá aprender Emissão, mas terá mais dificuldade para dominar técnicas dessa categoria.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Perícias e Ataques -->
-      <div class="grid-pericias-ataques">
-        <!-- Tabela de Perícias -->
-        <div class="card">
-          <div class="card-header roxo-escuro">Perícias</div>
-          <div class="tabela-scroll">
-            <table class="tabela-ficha" id="tabela-pericias">
-              <thead>
-                <tr>
-                  <th>Grau</th>
-                  <th>Perícia</th>
-                  <th>Atributo-base</th>
-                  <th>Benefícios</th>
-                  <th>Outros</th>
-                  <th>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Acrobacia</td>
-                  <td class="attr-tag">Agilidade</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Adestramento</td>
-                  <td class="attr-tag">Aura</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Artes /</td>
-                  <td class="attr-tag">Aura</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Atletismo</td>
-                  <td class="attr-tag">Força</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Atualidades</td>
-                  <td class="attr-tag">Intelecto</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Ciências /</td>
-                  <td class="attr-tag">Intelecto</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Crime / * #</td>
-                  <td class="attr-tag">Agilidade</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Diplomacia</td>
-                  <td class="attr-tag">Aura</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Enganação #</td>
-                  <td class="attr-tag">Aura</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Fortitude</td>
-                  <td class="attr-tag">Vigor</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Furtividade *</td>
-                  <td class="attr-tag">Agilidade</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Iniciativa</td>
-                  <td class="attr-tag">Agilidade</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Intimidação</td>
-                  <td class="attr-tag">Aura</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Intuição</td>
-                  <td class="attr-tag">Intelecto</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Investigação</td>
-                  <td class="attr-tag">Intelecto</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Luta</td>
-                  <td class="attr-tag">Força</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Medicina #</td>
-                  <td class="attr-tag">Intelecto</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">NEN</td>
-                  <td class="attr-tag">Aura</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Percepção</td>
-                  <td class="attr-tag">Aura</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Pilotagem /</td>
-                  <td class="attr-tag">Agilidade</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Pontaria</td>
-                  <td class="attr-tag">Agilidade</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Profissão</td>
-                  <td class="attr-tag">Intelecto</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Reflexos</td>
-                  <td class="attr-tag">Agilidade</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Religião</td>
-                  <td class="attr-tag">Intelecto</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Sobrevivência</td>
-                  <td class="attr-tag">Intelecto</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Tática</td>
-                  <td class="attr-tag">Intelecto</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Tecnologia # /</td>
-                  <td class="attr-tag">Intelecto</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-                <tr>
-                  <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
-                  <td class="pericia-nome">Vontade</td>
-                  <td class="attr-tag">Aura</td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0" class="total-cell"></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="legenda-pericias">
-            <span><strong>/</strong> Somente treinamento</span>
-            <span><strong>*</strong> Penalidade por carga</span>
-            <span><strong>#</strong> Kit de perícia</span>
-          </div>
-        </div>
-
-        <!-- Tabela de Ataques -->
-        <div class="card">
-          <div class="card-header roxo-vivo">Ataques</div>
-          <div class="tabela-scroll">
-            <table class="tabela-ficha" id="tabela-ataques">
-              <thead>
-                <tr>
-                  <th>Arma</th>
-                  <th>Tipo</th>
-                  <th>Teste</th>
-                  <th>Alcance</th>
-                  <th>Dano</th>
-                  <th>Crítico</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><input type="text" placeholder="Ex: Espada"></td>
-                  <td><input type="text" placeholder="Corte"></td>
-                  <td><input type="text" placeholder="Luta"></td>
-                  <td><input type="text" placeholder="Curto"></td>
-                  <td><input type="text" placeholder="1d8"></td>
-                  <td><input type="text" placeholder="19/x2"></td>
-                </tr>
-                <tr>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                </tr>
-                <tr>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                </tr>
-                <tr>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ==========================================
-         ABA 2: EQUIPAMENTOS E HABILIDADES
-    =========================================== -->
-    <section id="equipamentos-habilidades" class="secao">
-      <h2 class="titulo-secao">Equipamentos e Habilidades</h2>
-
-      <div class="grid-equip-hab">
-        <!-- Coluna Equipamentos -->
-        <div class="card">
-          <div class="card-header azul">Equipamentos</div>
-          <div class="barra-carga">
-            <label><input type="checkbox" id="somar-intelecto"> Somar intelecto?</label>
-            <div><span>Atual:</span> <input type="number" id="espacos-atual" value="0" class="mini-input"></div>
-            <div><span>ESPAÇOS:</span> <input type="number" id="espacos-max" value="5" class="mini-input"></div>
           </div>
 
-          <div class="tabela-scroll">
-            <table class="tabela-categorias" id="tabela-categorias">
-              <thead>
-                <tr>
-                  <th>0</th>
-                  <th>I</th>
-                  <th>II</th>
-                  <th>III</th>
-                  <th>IV</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="tabela-scroll">
-            <table class="tabela-ficha" id="tabela-itens">
-              <thead>
-                <tr>
-                  <th>Item</th>
-                  <th>Descrição</th>
-                  <th>Categoria</th>
-                  <th>Espaço</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                </tr>
-                <tr>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                </tr>
-                <tr>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                </tr>
-                <tr>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                </tr>
-                <tr>
-                  <td><input type="text"></td>
-                  <td><input type="text"></td>
-                  <td><input type="number" value="0"></td>
-                  <td><input type="number" value="0"></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Coluna Proficiências -->
-        <div class="coluna-hab">
           <div class="card">
-            <div class="card-header roxo">Proficiências</div>
-            <textarea id="proficiencias-txt" rows="6" placeholder="Armas simples, proteções leves..."></textarea>
+            <div class="card-header azul">História</div>
+            <textarea id="hist-historia" rows="8" placeholder="Escreva a história pregressa do agente..."></textarea>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- ==========================================
-         ABA 3: HISTÓRICO
-    =========================================== -->
-    <section id="historico" class="secao">
-      <h2 class="titulo-secao">Histórico do Agente</h2>
+      <!-- ==========================================
+           ABA 4: GUILDA
+      =========================================== -->
+      <section id="guilda" class="secao">
+        <h2 class="titulo-secao">Guilda</h2>
 
-      <div class="grid-historico">
-        <div class="card">
-          <div class="campo-hist"><label>Nome do agente</label><input type="text" id="hist-nome"></div>
-          <div class="campo-hist"><label>Idade</label><input type="text" id="hist-idade"></div>
-          <div class="campo-hist"><label>Gênero</label><input type="text" id="hist-genero"></div>
-          <div class="campo-hist"><label>Altura</label><input type="text" id="hist-altura"></div>
-          <div class="campo-hist"><label>Peso</label><input type="text" id="hist-peso"></div>
-          <div class="campo-hist"><label>Local de Nascimento</label><input type="text" id="hist-nascimento"></div>
-          <div class="campo-hist"><label>Descrição de aparência</label><textarea id="hist-aparencia" rows="4"></textarea></div>
-        </div>
-
-        <div class="card">
-          <div class="campo-hist"><label>Personalidade</label><textarea id="hist-personalidade" rows="2"></textarea></div>
-          <div class="campo-hist"><label>Objetivo Pessoal</label><textarea id="hist-objetivo" rows="2"></textarea></div>
-          <div class="campo-hist"><label>Vícios e Manias</label><textarea id="hist-vicios" rows="2"></textarea></div>
-          <div class="campo-hist"><label>Medos</label><textarea id="hist-medos" rows="2"></textarea></div>
-          <div class="campo-hist"><label>Gostos e Hobbies</label><textarea id="hist-hobbies" rows="2"></textarea></div>
-          <div class="campo-hist"><label>Comida Favorita</label><input type="text" id="hist-comida"></div>
-        </div>
-      </div>
-
-      <div class="grid-historico-inferior">
-        <div class="card">
-          <div class="card-header azul">Relacionamentos</div>
-          <div class="tabela-scroll">
-            <table class="tabela-ficha" id="tabela-relacionamentos">
-              <thead>
-                <tr>
-                  <th>Nome do Personagem/NPC</th>
-                  <th>Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr><td><input type="text"></td><td><input type="text"></td></tr>
-                <tr><td><input type="text"></td><td><input type="text"></td></tr>
-                <tr><td><input type="text"></td><td><input type="text"></td></tr>
-                <tr><td><input type="text"></td><td><input type="text"></td></tr>
-              </tbody>
-            </table>
+        <div class="grid-guilda">
+          <div class="card">
+            <div class="card-header azul">Históricos de Missões</div>
+            <div class="tabela-scroll">
+              <table class="tabela-ficha" id="tabela-missoes">
+                <thead>
+                  <tr>
+                    <th>Missão</th>
+                    <th>XP</th>
+                    <th>Moeda</th>
+                    <th>Data</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
+                  <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
+                  <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
+                  <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="totais-guilda">
+              <div><label>XP totais:</label><input type="number" id="guilda-xp-total" value="0"></div>
+              <div><label>Moedas totais:</label><input type="number" id="guilda-moedas-total" value="0"></div>
+            </div>
           </div>
         </div>
+      </section>
+
+      <!-- ==========================================
+           TRANSPARÊNCIA, RETENÇÃO E LGPD
+      =========================================== -->
+      <section id="privacidade-lgpd" class="secao">
+        <h2 class="titulo-secao">Privacidade, Retenção de Dados e LGPD</h2>
 
         <div class="card">
-          <div class="card-header azul">História</div>
-          <textarea id="hist-historia" rows="8" placeholder="Escreva a história pregressa do agente..."></textarea>
+          <div class="card-header roxo">Como suas informações são guardadas e removidas</div>
+          <p class="texto-nen">
+            Em conformidade com a Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018), os dados da ficha e da conta são tratados exclusivamente para salvar, sincronizar e recuperar sua ficha de agente no sistema <strong>Ordem de Arkan</strong>:
+          </p>
+          <p class="texto-nen">
+            <strong>1. Armazenamento na nuvem (Firebase Authentication &amp; Cloud Firestore):</strong> Quando você faz login, sua ficha é sincronizada na nuvem vinculada à sua conta e permanece salva por tempo indeterminado até que você solicite a exclusão da conta ou os dados sejam removidos no Firebase.
+          </p>
+          <p class="texto-nen">
+            <strong>2. Sessão offline / local sem recarga:</strong> Quando você escolhe <strong>Entrar offline/local</strong>, a ficha abre apenas na memória desta sessão e <strong>não fica salva se você carregar a página novamente</strong>. Quando você aceita o banner LGPD em uma sessão com conta/armazenamento habilitado, a cópia local no navegador segue sujeita à limpeza de dados do site ou descarte em aba anônima.
+          </p>
+          <p class="nota-nen">
+            <strong>O que pode apagar ou descartar os dados locais e da conta:</strong>
+            (a) Recarregar a página estando no modo offline/local;
+            (b) Limpar os dados do site, cache ou armazenamento local no navegador (como o Chrome no celular ou no PC);
+            (c) Usar aba anônima ou navegação privada;
+            (d) Clicar em <strong>Excluir conta</strong> e confirmar (o que apaga a conta e os dados da ficha salvos no Firebase e limpa os dados locais deste navegador).
+          </p>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- ==========================================
-         ABA 4: GUILDA
-    =========================================== -->
-    <section id="guilda" class="secao">
-      <h2 class="titulo-secao">Guilda</h2>
+    </main>
 
-      <div class="grid-guilda">
-        <div class="card">
-          <div class="card-header azul">Históricos de Missões</div>
-          <div class="tabela-scroll">
-            <table class="tabela-ficha" id="tabela-missoes">
-              <thead>
-                <tr>
-                  <th>Missão</th>
-                  <th>XP</th>
-                  <th>Moeda</th>
-                  <th>Data</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
-                <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
-                <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
-                <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="totais-guilda">
-            <div><label>XP totais:</label><input type="number" id="guilda-xp-total" value="0"></div>
-            <div><label>Moedas totais:</label><input type="number" id="guilda-moedas-total" value="0"></div>
-          </div>
-        </div>
-      </div>
-    </section>
+    <!-- Rodapé com informações do criador -->
+    <footer class="rodape">
+      <p>
+        <strong>Ordem de Arkan - Ficha de Agente</strong> — Criado e desenvolvido por <strong>Lucas Ramalho Gavasso Trizote</strong>.
+      </p>
+      <p class="rodape-sub">
+        Armazenamento conforme LGPD (Lei nº 13.709/2018): sincronização na nuvem via Firebase quando autenticado; modo offline/local não persiste ao recarregar a página.
+      </p>
+    </footer>
 
-    <!-- ==========================================
-         TRANSPARÊNCIA, RETENÇÃO E LGPD
-    =========================================== -->
-    <section id="privacidade-lgpd" class="secao">
-      <h2 class="titulo-secao">Privacidade, Retenção de Dados e LGPD</h2>
-
-      <div class="card">
-        <div class="card-header roxo">Como suas informações são guardadas e removidas</div>
-        <p class="texto-nen">
-          Em conformidade com a Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018), os dados da ficha e da conta são tratados exclusivamente para salvar, sincronizar e recuperar sua ficha de agente no sistema <strong>Ordem de Arkan</strong>:
-        </p>
-        <p class="texto-nen">
-          <strong>1. Armazenamento na nuvem (Firebase Authentication &amp; Cloud Firestore):</strong> Quando você faz login, sua ficha é sincronizada na nuvem vinculada à sua conta e permanece salva por tempo indeterminado até que você solicite a exclusão da conta ou os dados sejam removidos no Firebase.
-        </p>
-        <p class="texto-nen">
-          <strong>2. Armazenamento local no navegador (localStorage):</strong> Quando você clica em <strong>Entendi e Aceito</strong> no banner LGPD, uma cópia local da ficha e do seu aceite é salva no navegador deste aparelho sem data de expiração automática.
-        </p>
-        <p class="nota-nen">
-          <strong>O que pode apagar ou descartar os dados locais e da conta:</strong>
-          (a) Limpar os dados do site, cache ou armazenamento local no navegador (como o Chrome no celular ou no PC);
-          (b) Usar aba anônima ou navegação privada (onde o armazenamento local costuma ser descartado ao fechar a janela);
-          (c) Clicar em <strong>Excluir conta</strong> e confirmar (o que apaga a conta e os dados da ficha salvos no Firebase e limpa os dados locais deste navegador), ou não clicar em <strong>Entendi e Aceito</strong> no banner LGPD (impedindo a gravação da cópia local no navegador).
-        </p>
-      </div>
-    </section>
-
-  </main>
-
-  <!-- Rodapé com informações do criador -->
-  <footer class="rodape">
-    <p>
-      <strong>Ordem de Arkan - Ficha de Agente</strong> — Criado e desenvolvido por <strong>Lucas Ramalho Gavasso Trizote</strong>.
-    </p>
-    <p class="rodape-sub">
-      Armazenamento conforme LGPD (Lei nº 13.709/2018): cópia local mediante aceite no banner LGPD e sincronização na nuvem via Firebase quando autenticado.
-    </p>
-  </footer>
-
-  <!-- Aviso LGPD -->
-  <aside id="lgpd-banner" class="lgpd-banner" role="region" aria-label="Aviso de privacidade e armazenamento" hidden>
-    <p class="lgpd-text">
-      LGPD: Clicar em <strong>Entendi e Aceito</strong> salva uma cópia local da ficha no navegador (sujeita à limpeza de cache/dados do site ou descarte em aba anônima). Quando conectado, a ficha também é salva no Firebase até você <strong>Excluir conta</strong>.
-    </p>
-    <button
-      type="button"
-      id="lgpd-accept-btn"
-      class="btn-arkan btn-azul"
-      onclick="window.__aceitarLgpdArkan && window.__aceitarLgpdArkan()"
-    >
-      Entendi e Aceito
-    </button>
-  </aside>
+    <!-- Aviso LGPD -->
+    <aside id="lgpd-banner" class="lgpd-banner" role="region" aria-label="Aviso de privacidade e armazenamento" hidden>
+      <p class="lgpd-text">
+        LGPD: No modo offline/local, as informações não ficam salvas ao recarregar a página. Quando conectado ao Firebase, clicar em <strong>Entendi e Aceito</strong> permite manter cópia local neste navegador (sujeita à limpeza de cache/dados do site ou aba anônima) até você <strong>Excluir conta</strong>.
+      </p>
+      <button
+        type="button"
+        id="lgpd-accept-btn"
+        class="btn-arkan btn-azul"
+        onclick="window.__aceitarLgpdArkan && window.__aceitarLgpdArkan()"
+      >
+        Entendi e Aceito
+      </button>
+    </aside>
+  </div>
 
   <script type="module" src="script.js"></script>
 </body>
