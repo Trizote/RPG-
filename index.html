@@ -133,8 +133,19 @@
               </p>
               <div class="auth-acoes">
                 <button type="button" id="auth-sync-btn" class="btn-arkan btn-azul">Salvar na nuvem</button>
+                <button type="button" id="sheet-clear-open-btn" class="btn-arkan btn-perigo">Excluir ficha</button>
                 <button type="button" id="auth-logout-btn" class="btn-arkan btn-roxo">Sair</button>
                 <button type="button" id="auth-delete-open-btn" class="btn-arkan btn-perigo">Excluir conta</button>
+              </div>
+            </div>
+
+            <div id="sheet-clear-confirm-box" class="auth-delete-box" hidden>
+              <p class="auth-delete-aviso">
+                Tem certeza? Isso apagará os dados preenchidos desta ficha na tela, no navegador e na nuvem, mantendo sua conta ativa.
+              </p>
+              <div class="auth-acoes">
+                <button type="button" id="sheet-clear-confirm-btn" class="btn-arkan btn-perigo">Confirmar exclusão da ficha</button>
+                <button type="button" id="sheet-clear-cancel-btn" class="btn-arkan btn-roxo">Cancelar</button>
               </div>
             </div>
 
@@ -155,6 +166,7 @@
                 Modo ativo: <strong>Offline / Local</strong> — as informações <strong>não ficam salvas se você carregar a página novamente</strong>.
               </p>
               <div class="auth-acoes">
+                <button type="button" id="sheet-clear-offline-btn" class="btn-arkan btn-perigo">Excluir ficha</button>
                 <button type="button" id="btn-ir-login-nuvem" class="btn-arkan btn-azul">Entrar com conta Firebase</button>
               </div>
             </div>
@@ -908,7 +920,7 @@
             (a) Recarregar a página estando no modo offline/local;
             (b) Limpar os dados do site, cache ou armazenamento local no navegador (como o Chrome no celular ou no PC);
             (c) Usar aba anônima ou navegação privada;
-            (d) Clicar em <strong>Excluir conta</strong> e confirmar (o que apaga a conta e os dados da ficha salvos no Firebase e limpa os dados locais deste navegador).
+            (d) Clicar em <strong>Excluir ficha</strong> ou <strong>Excluir conta</strong> e confirmar (o que apaga a ficha salva no Firebase e limpa os dados locais deste navegador).
           </p>
         </div>
       </section>
@@ -928,7 +940,7 @@
     <!-- Aviso LGPD -->
     <aside id="lgpd-banner" class="lgpd-banner" role="region" aria-label="Aviso de privacidade e armazenamento" hidden>
       <p class="lgpd-text">
-        LGPD: No modo offline/local, as informações não ficam salvas ao recarregar a página. Quando conectado ao Firebase, clicar em <strong>Entendi e Aceito</strong> permite manter cópia local neste navegador (sujeita à limpeza de cache/dados do site ou aba anônima) até você <strong>Excluir conta</strong>.
+        LGPD: No modo offline/local, as informações não ficam salvas ao recarregar a página. Quando conectado ao Firebase, clicar em <strong>Entendi e Aceito</strong> permite manter cópia local neste navegador (sujeita à limpeza de cache/dados do site ou aba anônima) até você <strong>Excluir ficha</strong> ou <strong>Excluir conta</strong>.
       </p>
       <button
         type="button"

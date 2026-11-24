@@ -2,6 +2,7 @@
    Ordem de Arkan - Ficha de Agente (script.js)
    Segurança front-end (XSS, Prototype Pollution, integridade e console guard)
    + Firebase Authentication & Cloud Firestore + Sessão Offline/Local temporária
+   + Exclusão de ficha e exclusão de conta
    + Sincronização precisa das seções no topo conforme a rolagem
    Criador: Lucas Ramalho Gavasso Trizote
    ========================================================================== */
@@ -261,7 +262,7 @@ function enterOfflineTemporaryMode() {
 }
 
 /* --------------------------------------------------------------------------
-   Coleta e Aplicação Segura de Dados na Ficha
+   Coleta, Limpeza e Aplicação Segura de Dados na Ficha
    -------------------------------------------------------------------------- */
 function buildFieldKey(ctrl, index) {
   if (ctrl.id && /^[a-zA-Z0-9_-]{1,64}$/.test(ctrl.id) && !isForbiddenKey(ctrl.id)) {
@@ -351,6 +352,45 @@ function applySheetData(data) {
       ctrl.value = ctrl.tagName === "TEXTAREA"
         ? sanitizeText(String(savedVal), 5000)
         : sanitizeSingleLine(String(savedVal), 250);
+    }
+  });
+}
+
+function resetSheetFieldsToDefault() {
+  const mainEl = document.querySelector("main.container");
+  if (!mainEl) return;
+
+  const controls = mainEl.querySelectorAll("input, select, textarea");
+  controls.forEach((ctrl) => {
+    if (!ctrl || ctrl.closest("#login-firebase")) return;
+
+    if (ctrl.type === "checkbox") {
+      ctrl.checked = false;
+    } else if (ctrl.tagName === "SELECT") {
+      ctrl.selectedIndex = 0;
+    } else if (ctrl.type === "number") {
+      if (ctrl.id === "def-total" || ctrl.id === "def-esquiva") {
+        ctrl.value = "11";
+      } else if (ctrl.id === "def-deslocamento") {
+        ctrl.value = "9";
+      } else if (
+        ctrl.id === "attr-agi" ||
+        ctrl.id === "attr-for" ||
+        ctrl.id === "attr-ca" ||
+        ctrl.id === "attr-int" ||
+        ctrl.id === "attr-vig" ||
+        ctrl.id === "nv-val"
+      ) {
+        ctrl.value = "1";
+      } else if (ctrl.id === "espacos-max") {
+        ctrl.value = "5";
+      } else {
+        ctrl.value = "0";
+      }
+    } else if (ctrl.id === "rank-val") {
+      ctrl.value = "E";
+    } else {
+      ctrl.value = "";
     }
   });
 }
@@ -482,6 +522,36 @@ async function saveToFirestore(uid, data) {
   const safeData = data && data.fields ? data : buildSanitizedCloudPayload();
   await setDoc(docRef, safeData, { merge: true });
   return true;
+}
+
+async function handleClearSheetData() {
+  if (state.isSaving || state.isDeleting) return;
+
+  if (state.saveTimer) {
+    clearTimeout(state.saveTimer);
+    state.saveTimer = null;
+  }
+
+  resetSheetFieldsToDefault();
+  clearLocalData();
+
+  const clearConfirmBox = document.getElementById("sheet-clear-confirm-box");
+  if (clearConfirmBox) clearConfirmBox.hidden = true;
+
+  if (state.firebaseReady && state.db && state.user && state.user.uid) {
+    const { doc, deleteDoc } = state.firebaseModules.firestoreMod;
+    try {
+      await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, state.user.uid));
+      setStatusBanner("Ficha excluída da nuvem e do navegador.", "success");
+      return;
+    } catch (err) {
+      console.error("Erro ao excluir ficha no Firestore:", err);
+      setStatusBanner("Ficha limpa na tela, mas houve erro ao apagar na nuvem.", "error");
+      return;
+    }
+  }
+
+  setStatusBanner("Ficha limpa.", "warning");
 }
 
 async function handleAuthSubmit(event) {
@@ -649,8 +719,10 @@ function updateAuthUI() {
   const submitBtn = document.getElementById("auth-submit-btn");
   const toggleBtn = document.getElementById("auth-toggle-mode");
   const confirmBox = document.getElementById("auth-delete-confirm-box");
+  const clearConfirmBox = document.getElementById("sheet-clear-confirm-box");
 
   if (confirmBox) confirmBox.hidden = true;
+  if (clearConfirmBox) clearConfirmBox.hidden = true;
 
   renderSafeText(
     submitBtn,
@@ -753,13 +825,41 @@ function bindEvents() {
     logoutBtn.addEventListener("click", handleLogout);
   }
 
+  const clearOpenBtn = document.getElementById("sheet-clear-open-btn");
+  const clearConfirmBox = document.getElementById("sheet-clear-confirm-box");
+  const clearConfirmBtn = document.getElementById("sheet-clear-confirm-btn");
+  const clearCancelBtn = document.getElementById("sheet-clear-cancel-btn");
+  const clearOfflineBtn = document.getElementById("sheet-clear-offline-btn");
+
   const deleteOpenBtn = document.getElementById("auth-delete-open-btn");
   const deleteConfirmBox = document.getElementById("auth-delete-confirm-box");
   const deleteConfirmBtn = document.getElementById("auth-delete-confirm-btn");
   const deleteCancelBtn = document.getElementById("auth-delete-cancel-btn");
 
+  if (clearOpenBtn && clearConfirmBox) {
+    clearOpenBtn.addEventListener("click", () => {
+      if (deleteConfirmBox) deleteConfirmBox.hidden = true;
+      clearConfirmBox.hidden = !clearConfirmBox.hidden;
+    });
+  }
+
+  if (clearCancelBtn && clearConfirmBox) {
+    clearCancelBtn.addEventListener("click", () => {
+      clearConfirmBox.hidden = true;
+    });
+  }
+
+  if (clearConfirmBtn) {
+    clearConfirmBtn.addEventListener("click", handleClearSheetData);
+  }
+
+  if (clearOfflineBtn) {
+    clearOfflineBtn.addEventListener("click", handleClearSheetData);
+  }
+
   if (deleteOpenBtn && deleteConfirmBox) {
     deleteOpenBtn.addEventListener("click", () => {
+      if (clearConfirmBox) clearConfirmBox.hidden = true;
       deleteConfirmBox.hidden = !deleteConfirmBox.hidden;
     });
   }
