@@ -4,6 +4,8 @@
    anti-spam de escrita, higiene de sessão, isTrusted guard e console guard)
    + Firebase Authentication & Cloud Firestore + Sessão Offline/Local temporária
    + Modo Administrador por UID + Mensagem temporária por UID (minutos até 24h)
+   + Somente leitura, bloqueio de auto-save na inspeção, UIDs recentes,
+     ajuste rápido e prévia do recado ativo
    + Exclusão de ficha e exclusão de conta
    + Sincronização precisa das seções no topo conforme a rolagem
    + Cores dinâmicas conforme a Categoria Principal de Afinidade de Nen
@@ -26,7 +28,8 @@ const FIREBASE_CONFIG = Object.freeze({
 const STORAGE_KEYS = Object.freeze({
   LOCAL_SHEET: "ordem_de_arkan_agente_v1",
   COOKIE_CONSENT: "ordem_de_arkan_lgpd_v1",
-  ADMIN_TARGET_UID: "ordem_de_arkan_admin_target_uid_v1"
+  ADMIN_TARGET_UID: "ordem_de_arkan_admin_target_uid_v1",
+  ADMIN_RECENT_UIDS: "ordem_de_arkan_admin_recent_uids_v1"
 });
 
 const ADMIN_UID = "TcudbnuOMcTySJWhz0JHaNDuNU22";
@@ -34,6 +37,7 @@ const UID_REGEX = /^[a-zA-Z0-9_-]{10,128}$/;
 const ADMIN_NOTICE_FIELD_KEY = "id:admin_recado_payload";
 const MAX_NOTICE_HOURS = 24;
 const MAX_NOTICE_MINUTES = MAX_NOTICE_HOURS * 60;
+const MAX_RECENT_UIDS = 6;
 const NOTICE_DURATION_PRESETS = Object.freeze([
   { minutes: 15, label: "15 minutos" },
   { minutes: 30, label: "30 minutos" },
@@ -120,6 +124,8 @@ const state = {
   lastSavedSnapshot: "",
   lastCloudWriteAt: 0,
   adminTargetUid: "",
+  adminRecentUids: [],
+  adminReadOnly: false,
   activeNotice: null,
   noticeExpiryTimer: null
 };
@@ -250,6 +256,13 @@ function formatDurationLabel(minutes) {
   return remMinutes === 0 ? `${wholeHours}h` : `${wholeHours}h ${remMinutes}min`;
 }
 
+function formatRemainingTimeLabel(expiresAtMs) {
+  const diffMs = Number(expiresAtMs) - Date.now();
+  if (!Number.isFinite(diffMs) || diffMs <= 0) return "expirado";
+  const totalMin = Math.max(1, Math.ceil(diffMs / 60000));
+  return `restam ~${formatDurationLabel(totalMin)}`;
+}
+
 function buildEncodedNoticePayload(messageText, minutesValue) {
   const cleanText = sanitizeText(String(messageText ?? ""), 600).trim();
   if (!cleanText) return "";
@@ -321,6 +334,7 @@ function scheduleNoticeExpiryCheck() {
   if (remainingMs <= 0) {
     state.activeNotice = null;
     renderPlayerNoticeBanner();
+    updateAdminNoticePreviewUI();
     return;
   }
 
@@ -329,6 +343,7 @@ function scheduleNoticeExpiryCheck() {
     if (state.activeNotice && Date.now() >= state.activeNotice.expiresAt) {
       state.activeNotice = null;
       renderPlayerNoticeBanner();
+      updateAdminNoticePreviewUI();
     }
   }, Math.min(remainingMs + 250, 2147483647));
 }
@@ -364,7 +379,7 @@ function renderPlayerNoticeBanner() {
   title.style.cssText = "color: #ffe082; font-size: 13px;";
 
   const meta = document.createElement("span");
-  meta.textContent = `Duração: ${formatDurationLabel(state.activeNotice.minutes)} (expira em ${expFormatted})`;
+  meta.textContent = `Duração: ${formatDurationLabel(state.activeNotice.minutes)} (${formatRemainingTimeLabel(state.activeNotice.expiresAt)} · expira em ${expFormatted})`;
   meta.style.cssText = "color: #d6dee6; font-size: 12px;";
 
   const body = document.createElement("p");
@@ -411,10 +426,14 @@ function ensurePlayerNoticeBannerElement() {
 }
 
 /* --------------------------------------------------------------------------
-   Helpers de Modo Administrador por UID
+   Helpers de Modo Administrador por UID e Ferramentas Extras
    -------------------------------------------------------------------------- */
 function isCurrentUserAdmin() {
   return Boolean(state.user && typeof state.user.uid === "string" && state.user.uid === ADMIN_UID);
+}
+
+function isInspectionReadOnlyActive() {
+  return Boolean(isCurrentUserAdmin() && state.adminReadOnly);
 }
 
 function sanitizeTargetUid(rawUid) {
@@ -443,6 +462,31 @@ function loadAdminTargetUidFromStorage() {
   }
 }
 
+function recordRecentAdminUid(uid) {
+  const clean = sanitizeTargetUid(uid);
+  if (!clean) return;
+  const next = [clean, ...state.adminRecentUids.filter((item) => item !== clean)].slice(0, MAX_RECENT_UIDS);
+  state.adminRecentUids = next;
+  try {
+    sessionStorage.setItem(STORAGE_KEYS.ADMIN_RECENT_UIDS, JSON.stringify(next));
+  } catch {
+    // Ignora falha de armazenamento
+  }
+  updateAdminRecentUidsUI();
+}
+
+function loadRecentAdminUidsFromStorage() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEYS.ADMIN_RECENT_UIDS);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(sanitizeTargetUid).filter(Boolean).slice(0, MAX_RECENT_UIDS);
+  } catch {
+    return [];
+  }
+}
+
 function getActiveTargetUid() {
   if (!state.user || !state.user.uid) return "";
   if (isCurrentUserAdmin() && state.adminTargetUid) {
@@ -451,10 +495,108 @@ function getActiveTargetUid() {
   return state.user.uid;
 }
 
+function applySheetReadOnlyState() {
+  const mainEl = document.querySelector("main.container");
+  if (!mainEl) return;
+
+  const lock = isInspectionReadOnlyActive();
+  const controls = mainEl.querySelectorAll("input, select, textarea");
+  controls.forEach((ctrl) => {
+    if (!ctrl || ctrl.closest("#login-firebase")) return;
+    if (ctrl.tagName === "SELECT" || ctrl.type === "checkbox") {
+      ctrl.disabled = lock;
+    } else {
+      ctrl.readOnly = lock;
+      ctrl.setAttribute("aria-readonly", lock ? "true" : "false");
+    }
+  });
+}
+
+function syncAdminQuickInputsFromSheet() {
+  const nvInput = document.getElementById("admin-quick-nv");
+  const rankSelect = document.getElementById("admin-quick-rank");
+  const slotsInput = document.getElementById("admin-quick-slots");
+
+  const sheetNv = document.getElementById("nv-val");
+  const sheetRank = document.getElementById("rank-val");
+  const sheetSlots = document.getElementById("espacos-max");
+
+  if (nvInput && sheetNv && document.activeElement !== nvInput) {
+    nvInput.value = normalizeNumericValue("nv-val", sheetNv.value || "1");
+  }
+  if (rankSelect && sheetRank && document.activeElement !== rankSelect) {
+    const cleanRank = normalizeRankValue(sheetRank.value || "E");
+    rankSelect.value = ALLOWED_RANKS.includes(cleanRank) ? cleanRank : "E";
+  }
+  if (slotsInput && sheetSlots && document.activeElement !== slotsInput) {
+    slotsInput.value = normalizeNumericValue("espacos-max", sheetSlots.value || "5");
+  }
+}
+
+function updateAdminNoticePreviewUI() {
+  const previewEl = document.getElementById("admin-notice-preview");
+  if (!previewEl) return;
+
+  if (!state.activeNotice || Date.now() >= (state.activeNotice.expiresAt || 0)) {
+    previewEl.textContent = "Recado ativo no alvo: nenhum recado ativo no momento.";
+    return;
+  }
+
+  previewEl.textContent = `Recado ativo no alvo (${formatRemainingTimeLabel(state.activeNotice.expiresAt)}): "${state.activeNotice.msg}"`;
+}
+
+function updateAdminRecentUidsUI() {
+  const container = document.getElementById("admin-recent-uids-box");
+  if (!container) return;
+
+  container.innerHTML = "";
+  if (!state.adminRecentUids.length) {
+    container.hidden = true;
+    return;
+  }
+
+  container.hidden = false;
+  const label = document.createElement("span");
+  label.textContent = "UIDs recentes:";
+  label.style.cssText = "font-size: 12px; color: #b8c2cc; margin-right: 4px;";
+  container.appendChild(label);
+
+  state.adminRecentUids.forEach((uid) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.textContent = uid.length > 14 ? `${uid.slice(0, 10)}…` : uid;
+    chip.title = uid;
+    const isSelected = state.adminTargetUid === uid;
+    chip.style.cssText = [
+      "padding: 4px 8px",
+      "border-radius: 6px",
+      "font-size: 11px",
+      "cursor: pointer",
+      isSelected
+        ? "border: 1px solid #ffd966; background: rgba(255,217,102,0.18); color: #ffd966; font-weight: 700;"
+        : "border: 1px solid rgba(255,255,255,0.2); background: rgba(10,14,18,0.7); color: #e4e4ec;"
+    ].join(";");
+    chip.addEventListener("click", async () => {
+      const input = document.getElementById("admin-target-uid-input");
+      if (input) input.value = uid;
+      state.adminTargetUid = uid;
+      saveAdminTargetUidToStorage(uid);
+      recordRecentAdminUid(uid);
+      state.lastSavedSnapshot = "";
+      updateAdminBarUI();
+      setStatusBanner(`Carregando ficha do UID ${uid}...`, "info");
+      await loadFromFirestore(uid);
+    });
+    container.appendChild(chip);
+  });
+}
+
 function updateAdminBarUI() {
   const bar = document.getElementById("admin-uid-bar");
 
   if (!isCurrentUserAdmin()) {
+    state.adminReadOnly = false;
+    applySheetReadOnlyState();
     if (bar) bar.hidden = true;
     return;
   }
@@ -463,18 +605,31 @@ function updateAdminBarUI() {
   const activeBar = document.getElementById("admin-uid-bar");
   const activeInput = document.getElementById("admin-target-uid-input");
   const activeBadge = document.getElementById("admin-target-status");
+  const readOnlyBtn = document.getElementById("admin-toggle-readonly-btn");
 
   if (activeBar) activeBar.hidden = false;
   if (activeInput && document.activeElement !== activeInput) {
     activeInput.value = state.adminTargetUid || "";
   }
   if (activeBadge) {
+    const modeLabel = state.adminReadOnly ? " · SOMENTE LEITURA (auto-save pausado)" : " · Edição ativa";
     if (state.adminTargetUid && state.adminTargetUid !== state.user.uid) {
-      activeBadge.textContent = `Alvo selecionado: ${state.adminTargetUid}`;
+      activeBadge.textContent = `Alvo: ${state.adminTargetUid}${modeLabel}`;
     } else {
-      activeBadge.textContent = `Alvo atual: própria conta (${state.user.uid})`;
+      activeBadge.textContent = `Alvo: própria conta (${state.user.uid})${modeLabel}`;
     }
   }
+  if (readOnlyBtn) {
+    readOnlyBtn.textContent = state.adminReadOnly ? "Somente leitura: ON" : "Somente leitura: OFF";
+    readOnlyBtn.style.background = state.adminReadOnly ? "rgba(255, 217, 102, 0.22)" : "transparent";
+    readOnlyBtn.style.color = state.adminReadOnly ? "#ffd966" : "#e4e4ec";
+    readOnlyBtn.style.borderColor = state.adminReadOnly ? "#ffd966" : "rgba(255,255,255,0.25)";
+  }
+
+  applySheetReadOnlyState();
+  updateAdminRecentUidsUI();
+  updateAdminNoticePreviewUI();
+  syncAdminQuickInputsFromSheet();
 }
 
 function ensureAdminBarElement() {
@@ -505,7 +660,7 @@ function ensureAdminBarElement() {
   topRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;";
 
   const title = document.createElement("strong");
-  title.textContent = "Modo Admin (UID e Mensagem em Minutos até 24h)";
+  title.textContent = "Modo Admin (UID, Mensagem até 24h e Controles)";
   title.style.cssText = "color: #ffd966; font-size: 13px;";
 
   const statusSpan = document.createElement("span");
@@ -565,9 +720,117 @@ function ensureAdminBarElement() {
     "cursor: pointer"
   ].join(";");
 
+  const readOnlyBtn = document.createElement("button");
+  readOnlyBtn.type = "button";
+  readOnlyBtn.id = "admin-toggle-readonly-btn";
+  readOnlyBtn.textContent = "Somente leitura: OFF";
+  readOnlyBtn.style.cssText = [
+    "padding: 8px 12px",
+    "border-radius: 8px",
+    "border: 1px solid rgba(255,255,255,0.25)",
+    "background: transparent",
+    "color: #e4e4ec",
+    "font-size: 13px",
+    "cursor: pointer"
+  ].join(";");
+
   uidRow.appendChild(input);
   uidRow.appendChild(loadBtn);
   uidRow.appendChild(selfBtn);
+  uidRow.appendChild(readOnlyBtn);
+
+  const recentBox = document.createElement("div");
+  recentBox.id = "admin-recent-uids-box";
+  recentBox.hidden = true;
+  recentBox.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px; align-items: center;";
+
+  const quickRow = document.createElement("div");
+  quickRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+  const nvLabel = document.createElement("label");
+  nvLabel.htmlFor = "admin-quick-nv";
+  nvLabel.textContent = "Nível:";
+  nvLabel.style.cssText = "font-size: 12px; color: #d6dee6;";
+
+  const nvInput = document.createElement("input");
+  nvInput.type = "number";
+  nvInput.id = "admin-quick-nv";
+  nvInput.min = "1";
+  nvInput.max = "99";
+  nvInput.style.cssText = [
+    "width: 68px",
+    "padding: 6px 8px",
+    "border-radius: 8px",
+    "border: 1px solid rgba(255,255,255,0.22)",
+    "background: rgba(10,14,18,0.85)",
+    "color: #fff",
+    "font-size: 13px"
+  ].join(";");
+
+  const rankLabel = document.createElement("label");
+  rankLabel.htmlFor = "admin-quick-rank";
+  rankLabel.textContent = "Rank:";
+  rankLabel.style.cssText = "font-size: 12px; color: #d6dee6;";
+
+  const rankSelect = document.createElement("select");
+  rankSelect.id = "admin-quick-rank";
+  rankSelect.style.cssText = [
+    "padding: 6px 8px",
+    "border-radius: 8px",
+    "border: 1px solid rgba(255,255,255,0.22)",
+    "background: rgba(10,14,18,0.92)",
+    "color: #fff",
+    "font-size: 13px"
+  ].join(";");
+  ALLOWED_RANKS.forEach((rk) => {
+    const opt = document.createElement("option");
+    opt.value = rk;
+    opt.textContent = rk;
+    rankSelect.appendChild(opt);
+  });
+
+  const slotsLabel = document.createElement("label");
+  slotsLabel.htmlFor = "admin-quick-slots";
+  slotsLabel.textContent = "Espaços máx.:";
+  slotsLabel.style.cssText = "font-size: 12px; color: #d6dee6;";
+
+  const slotsInput = document.createElement("input");
+  slotsInput.type = "number";
+  slotsInput.id = "admin-quick-slots";
+  slotsInput.min = "0";
+  slotsInput.max = "200";
+  slotsInput.style.cssText = [
+    "width: 76px",
+    "padding: 6px 8px",
+    "border-radius: 8px",
+    "border: 1px solid rgba(255,255,255,0.22)",
+    "background: rgba(10,14,18,0.85)",
+    "color: #fff",
+    "font-size: 13px"
+  ].join(";");
+
+  const applyQuickBtn = document.createElement("button");
+  applyQuickBtn.type = "button";
+  applyQuickBtn.id = "admin-apply-quick-btn";
+  applyQuickBtn.textContent = "Aplicar e salvar";
+  applyQuickBtn.style.cssText = [
+    "padding: 7px 11px",
+    "border-radius: 8px",
+    "border: none",
+    "background: #356899",
+    "color: #fff",
+    "font-weight: 600",
+    "font-size: 12px",
+    "cursor: pointer"
+  ].join(";");
+
+  quickRow.appendChild(nvLabel);
+  quickRow.appendChild(nvInput);
+  quickRow.appendChild(rankLabel);
+  quickRow.appendChild(rankSelect);
+  quickRow.appendChild(slotsLabel);
+  quickRow.appendChild(slotsInput);
+  quickRow.appendChild(applyQuickBtn);
 
   const msgRow = document.createElement("div");
   msgRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch;";
@@ -645,9 +908,16 @@ function ensureAdminBarElement() {
   msgRow.appendChild(sendNoticeBtn);
   msgRow.appendChild(clearNoticeBtn);
 
+  const previewEl = document.createElement("div");
+  previewEl.id = "admin-notice-preview";
+  previewEl.style.cssText = "font-size: 12px; color: #ffe082; word-break: break-word;";
+
   bar.appendChild(topRow);
   bar.appendChild(uidRow);
+  bar.appendChild(recentBox);
+  bar.appendChild(quickRow);
   bar.appendChild(msgRow);
+  bar.appendChild(previewEl);
 
   if (mainEl && mainEl.parentNode === anchorParent) {
     anchorParent.insertBefore(bar, mainEl);
@@ -657,8 +927,54 @@ function ensureAdminBarElement() {
 
   loadBtn.addEventListener("click", handleAdminLoadTargetUid);
   selfBtn.addEventListener("click", handleAdminReturnToOwnSheet);
+  readOnlyBtn.addEventListener("click", handleAdminToggleReadOnly);
+  applyQuickBtn.addEventListener("click", handleAdminApplyQuickStats);
   sendNoticeBtn.addEventListener("click", handleAdminSendNotice);
   clearNoticeBtn.addEventListener("click", handleAdminClearNotice);
+}
+
+function handleAdminToggleReadOnly(event) {
+  if (event && event.isTrusted === false) return;
+  if (!isCurrentUserAdmin()) return;
+
+  state.adminReadOnly = !state.adminReadOnly;
+  if (state.adminReadOnly && state.saveTimer) {
+    clearTimeout(state.saveTimer);
+    state.saveTimer = null;
+  }
+  updateAdminBarUI();
+  setStatusBanner(
+    state.adminReadOnly
+      ? "Modo somente leitura ativado: edição e auto-salvamento pausados."
+      : "Modo somente leitura desativado: edição liberada.",
+    "info"
+  );
+}
+
+async function handleAdminApplyQuickStats(event) {
+  if (event && event.isTrusted === false) return;
+  if (!isCurrentUserAdmin()) return;
+
+  const nvInput = document.getElementById("admin-quick-nv");
+  const rankSelect = document.getElementById("admin-quick-rank");
+  const slotsInput = document.getElementById("admin-quick-slots");
+
+  const sheetNv = document.getElementById("nv-val");
+  const sheetRank = document.getElementById("rank-val");
+  const sheetSlots = document.getElementById("espacos-max");
+
+  if (sheetNv && nvInput) {
+    sheetNv.value = normalizeNumericValue("nv-val", nvInput.value);
+  }
+  if (sheetRank && rankSelect) {
+    sheetRank.value = normalizeRankValue(rankSelect.value);
+  }
+  if (sheetSlots && slotsInput) {
+    sheetSlots.value = normalizeNumericValue("espacos-max", slotsInput.value);
+  }
+
+  recalculateSkillsTable();
+  await persistSheet(true);
 }
 
 async function handleAdminLoadTargetUid(event) {
@@ -677,6 +993,7 @@ async function handleAdminLoadTargetUid(event) {
 
   state.adminTargetUid = uid;
   saveAdminTargetUidToStorage(uid);
+  recordRecentAdminUid(uid);
   state.lastSavedSnapshot = "";
   updateAdminBarUI();
   setStatusBanner(`Carregando ficha do UID ${uid}...`, "info");
@@ -721,6 +1038,7 @@ async function handleAdminSendNotice(event) {
 
   state.adminTargetUid = targetUid;
   saveAdminTargetUidToStorage(targetUid);
+  recordRecentAdminUid(targetUid);
   updateAdminBarUI();
 
   const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
@@ -754,6 +1072,7 @@ async function handleAdminSendNotice(event) {
       state.activeNotice = parseActiveNoticeFromFields(nextFields);
       scheduleNoticeExpiryCheck();
       renderPlayerNoticeBanner();
+      updateAdminNoticePreviewUI();
     }
 
     setStatusBanner(
@@ -814,6 +1133,7 @@ async function handleAdminClearNotice(event) {
       state.activeNotice = null;
       scheduleNoticeExpiryCheck();
       renderPlayerNoticeBanner();
+      updateAdminNoticePreviewUI();
     }
 
     setStatusBanner(`Recado removido do UID ${targetUid}.`, "success");
@@ -1230,14 +1550,17 @@ function applySheetData(data) {
     state.activeNotice = null;
     scheduleNoticeExpiryCheck();
     renderPlayerNoticeBanner();
+    updateAdminNoticePreviewUI();
     recalculateSkillsTable();
     syncNenCategoryFromSelect();
+    syncAdminQuickInputsFromSheet();
     return;
   }
 
   state.activeNotice = parseActiveNoticeFromFields(data.fields);
   scheduleNoticeExpiryCheck();
   renderPlayerNoticeBanner();
+  updateAdminNoticePreviewUI();
 
   const mainEl = document.querySelector("main.container");
   if (!mainEl) return;
@@ -1260,6 +1583,8 @@ function applySheetData(data) {
   recalculateSkillsTable();
   state.lastSavedSnapshot = computeFieldsSnapshot(collectSheetData().fields);
   syncNenCategoryFromSelect();
+  syncAdminQuickInputsFromSheet();
+  applySheetReadOnlyState();
 }
 
 function resetSheetFieldsToDefault() {
@@ -1303,6 +1628,7 @@ function resetSheetFieldsToDefault() {
   recalculateSkillsTable();
   state.lastSavedSnapshot = "";
   syncNenCategoryFromSelect();
+  syncAdminQuickInputsFromSheet();
 }
 
 function saveLocalData(data) {
@@ -1439,14 +1765,20 @@ async function initFirebase() {
         state.offlineMode = false;
         if (user.uid === ADMIN_UID) {
           state.adminTargetUid = loadAdminTargetUidFromStorage();
+          state.adminRecentUids = loadRecentAdminUidsFromStorage();
+          if (state.adminTargetUid) recordRecentAdminUid(state.adminTargetUid);
         } else {
           state.adminTargetUid = "";
+          state.adminRecentUids = [];
+          state.adminReadOnly = false;
           saveAdminTargetUidToStorage("");
         }
         clearAuthSensitiveInputs();
         setEntradaStatus("");
       } else {
         state.adminTargetUid = "";
+        state.adminRecentUids = [];
+        state.adminReadOnly = false;
         state.activeNotice = null;
         scheduleNoticeExpiryCheck();
         saveAdminTargetUidToStorage("");
@@ -1501,6 +1833,7 @@ async function loadFromFirestore(uid) {
       state.activeNotice = null;
       scheduleNoticeExpiryCheck();
       renderPlayerNoticeBanner();
+      updateAdminNoticePreviewUI();
       resetSheetFieldsToDefault();
       const initialData = buildSanitizedCloudPayload();
       await setDoc(docRef, initialData);
@@ -1541,6 +1874,10 @@ async function saveToFirestore(uid, data) {
 async function handleClearSheetData(event) {
   if (event && event.isTrusted === false) return;
   if (state.isSaving || state.isDeleting) return;
+  if (isInspectionReadOnlyActive()) {
+    setStatusBanner("Desative 'Somente leitura' para limpar ou excluir fichas.", "warning");
+    return;
+  }
 
   if (state.saveTimer) {
     clearTimeout(state.saveTimer);
@@ -1553,6 +1890,7 @@ async function handleClearSheetData(event) {
   state.activeNotice = null;
   scheduleNoticeExpiryCheck();
   renderPlayerNoticeBanner();
+  updateAdminNoticePreviewUI();
   resetSheetFieldsToDefault();
   if (!isRemoteTarget) {
     clearLocalData();
@@ -1632,6 +1970,8 @@ async function handleLogout(event) {
   if (event && event.isTrusted === false) return;
   state.offlineMode = false;
   state.adminTargetUid = "";
+  state.adminRecentUids = [];
+  state.adminReadOnly = false;
   state.activeNotice = null;
   scheduleNoticeExpiryCheck();
   saveAdminTargetUidToStorage("");
@@ -1676,6 +2016,8 @@ async function handleDeleteAccount(event) {
     clearAuthSensitiveInputs();
     state.offlineMode = false;
     state.adminTargetUid = "";
+    state.adminRecentUids = [];
+    state.adminReadOnly = false;
     state.activeNotice = null;
     scheduleNoticeExpiryCheck();
     saveAdminTargetUidToStorage("");
@@ -1699,10 +2041,13 @@ async function handleDeleteAccount(event) {
 }
 
 /* --------------------------------------------------------------------------
-   Salvamento da Ficha (com proteção contra gravação redundante e spam)
+   Salvamento da Ficha (com proteção contra gravação redundante, inspeção e spam)
    -------------------------------------------------------------------------- */
 async function persistSheet(forceWrite = false) {
   if (state.isSaving || state.isDeleting) return;
+  if (!forceWrite && isInspectionReadOnlyActive()) {
+    return;
+  }
   state.isSaving = true;
 
   try {
@@ -1738,6 +2083,7 @@ async function persistSheet(forceWrite = false) {
       const cloudPayload = buildSanitizedCloudPayload();
       await saveToFirestore(targetUid, cloudPayload);
       state.lastSavedSnapshot = computeFieldsSnapshot(cloudPayload.fields);
+      syncAdminQuickInputsFromSheet();
       setStatusBanner(
         isRemoteTarget
           ? `Ficha salva no Firestore para o UID ${targetUid}.`
@@ -1763,6 +2109,7 @@ async function persistSheet(forceWrite = false) {
 }
 
 function scheduleAutoSave() {
+  if (isInspectionReadOnlyActive()) return;
   if (state.saveTimer) clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(() => {
     persistSheet(false);
@@ -1998,7 +2345,9 @@ function bindEvents() {
   if (mainEl) {
     const handleFieldUpdate = (event) => {
       if (event.target && event.target.closest("#login-firebase")) return;
+      if (isInspectionReadOnlyActive()) return;
       recalculateSkillsTable();
+      syncAdminQuickInputsFromSheet();
       scheduleAutoSave();
     };
     mainEl.addEventListener("input", handleFieldUpdate);
@@ -2017,6 +2366,7 @@ document.addEventListener("DOMContentLoaded", () => {
   } else {
     recalculateSkillsTable();
     syncNenCategoryFromSelect();
+    syncAdminQuickInputsFromSheet();
   }
 
   setActiveSectionIndicator("dados-agente");
