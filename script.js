@@ -5,8 +5,9 @@
    + Firebase Authentication & Cloud Firestore + Sessão Offline/Local temporária
    + Modo Administrador por UID (exclusivo): Prompt de Comando, Funções
      Dinâmicas do Comando Abaixo, Todos os Comandos Ativos, Mensagem até 24h
-     (Normal/Urgente), Somente Leitura, UIDs Recentes, Ajuste Rápido,
-     Modelos Base, Diff, Backup JSON e Log da Sessão
+     (Normal/Urgente), Admin Temporário até 24h (sem adicionar/remover admin),
+     Somente Leitura, UIDs Recentes, Ajuste Rápido, Modelos Base, Diff,
+     Backup JSON e Log da Sessão
    + Exclusão de ficha e exclusão de conta
    + Sincronização precisa das seções no topo conforme a rolagem
    + Cores dinâmicas conforme a Categoria Principal de Afinidade de Nen
@@ -36,12 +37,15 @@ const STORAGE_KEYS = Object.freeze({
 const ADMIN_UID = "TcudbnuOMcTySJWhz0JHaNDuNU22";
 const UID_REGEX = /^[a-zA-Z0-9_-]{10,128}$/;
 const ADMIN_NOTICE_FIELD_KEY = "id:admin_recado_payload";
+const TEMP_ADMIN_GRANT_FIELD_KEY = "id:admin_temp_grant_payload";
 const MAX_NOTICE_HOURS = 24;
 const MAX_NOTICE_MINUTES = MAX_NOTICE_HOURS * 60;
+const MAX_TEMP_ADMIN_MINUTES = MAX_NOTICE_HOURS * 60;
 const MAX_RECENT_UIDS = 6;
 const MAX_ADMIN_LOGS = 25;
 
 const ADMIN_COMMAND_CATALOG = Object.freeze([
+  { cmd: "/admin", syntax: "/admin <UID> [min]", desc: "Dar admin até 24h (sem add/remover admin)", masterOnly: true },
   { cmd: "/uid", syntax: "/uid <UID>", desc: "Carregar ou trocar UID alvo" },
   { cmd: "/minha", syntax: "/minha", desc: "Voltar para a própria ficha" },
   { cmd: "/recado", syntax: "/recado <min> <texto>", desc: "Enviar recado normal (até 24h)" },
@@ -193,6 +197,8 @@ const state = {
   lastSavedSnapshot: "",
   baselineFields: createSafeRecord(),
   lastCloudWriteAt: 0,
+  tempAdminGrant: null,
+  tempAdminExpiryTimer: null,
   adminTargetUid: "",
   adminRecentUids: [],
   adminReadOnly: false,
@@ -200,6 +206,8 @@ const state = {
   adminActiveCommand: "",
   adminAllCommandsActive: false,
   adminDraftUid: "",
+  adminDraftTempAdminUid: "",
+  adminDraftTempAdminMinutes: MAX_TEMP_ADMIN_MINUTES,
   adminDraftNoticeText: "",
   adminDraftNoticeMinutes: MAX_NOTICE_MINUTES,
   adminDraftNoticePriority: "normal",
@@ -318,6 +326,126 @@ function initConsoleSecurityGuard() {
   } catch {
     // Ignora caso console esteja restrito
   }
+}
+
+/* --------------------------------------------------------------------------
+   Administrador Temporário até 24h (Sem Permissão de Adicionar/Remover Admin)
+   -------------------------------------------------------------------------- */
+function normalizeTempAdminMinutes(rawMinutes) {
+  const num = Number(rawMinutes);
+  if (!Number.isFinite(num) || num <= 0) return MAX_TEMP_ADMIN_MINUTES;
+  return Math.min(MAX_TEMP_ADMIN_MINUTES, Math.max(1, Math.trunc(num)));
+}
+
+function buildEncodedTempAdminGrant(targetUid, minutesValue, grantedByUid) {
+  const uid = sanitizeTargetUid(targetUid);
+  const granter = sanitizeTargetUid(grantedByUid);
+  if (!uid || granter !== ADMIN_UID) return "";
+
+  const minutes = normalizeTempAdminMinutes(minutesValue);
+  const nowMs = Date.now();
+  const maxAllowedExpiryMs = nowMs + MAX_TEMP_ADMIN_MINUTES * 60 * 1000;
+  const requestedExpiryMs = nowMs + minutes * 60 * 1000;
+  const expiresAtMs = Math.min(maxAllowedExpiryMs, requestedExpiryMs);
+
+  return JSON.stringify({
+    uid,
+    grantedBy: granter,
+    minutes,
+    grantedAt: nowMs,
+    expiresAt: expiresAtMs
+  });
+}
+
+function parseTempAdminGrantFromFields(fieldsObj, expectedUid = "") {
+  if (!fieldsObj || typeof fieldsObj !== "object") return null;
+  if (!Object.prototype.hasOwnProperty.call(fieldsObj, TEMP_ADMIN_GRANT_FIELD_KEY)) return null;
+
+  const raw = fieldsObj[TEMP_ADMIN_GRANT_FIELD_KEY];
+  if (typeof raw !== "string" || !raw.trim() || raw.length > 2000) return null;
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const uid = sanitizeTargetUid(parsed.uid);
+    const grantedBy = sanitizeTargetUid(parsed.grantedBy);
+    const grantedAt = Number(parsed.grantedAt);
+    const expiresAt = Number(parsed.expiresAt);
+    const minutes = normalizeTempAdminMinutes(parsed.minutes);
+
+    if (!uid || grantedBy !== ADMIN_UID || !Number.isFinite(expiresAt)) return null;
+    if (expectedUid && uid !== expectedUid) return null;
+
+    const nowMs = Date.now();
+    const baseTime = Number.isFinite(grantedAt) ? grantedAt : nowMs;
+    const hardCapMs = baseTime + MAX_TEMP_ADMIN_MINUTES * 60 * 1000;
+    const effectiveExpiryMs = Math.min(expiresAt, hardCapMs);
+
+    if (nowMs >= effectiveExpiryMs) {
+      return null;
+    }
+
+    return {
+      uid,
+      grantedBy,
+      minutes,
+      grantedAt: baseTime,
+      expiresAt: effectiveExpiryMs
+    };
+  } catch {
+    return null;
+  }
+}
+
+function scheduleTempAdminExpiryCheck() {
+  if (state.tempAdminExpiryTimer) {
+    clearTimeout(state.tempAdminExpiryTimer);
+    state.tempAdminExpiryTimer = null;
+  }
+
+  if (!state.tempAdminGrant || !Number.isFinite(state.tempAdminGrant.expiresAt)) return;
+
+  const remainingMs = state.tempAdminGrant.expiresAt - Date.now();
+  if (remainingMs <= 0) {
+    state.tempAdminGrant = null;
+    updateAdminBarUI();
+    return;
+  }
+
+  state.tempAdminExpiryTimer = setTimeout(() => {
+    state.tempAdminExpiryTimer = null;
+    if (state.tempAdminGrant && Date.now() >= state.tempAdminGrant.expiresAt) {
+      state.tempAdminGrant = null;
+      if (state.adminActiveCommand === "/admin") {
+        state.adminActiveCommand = "";
+      }
+      updateAdminBarUI();
+      setStatusBanner("A função temporária de administrador expirou (limite de 24h).", "warning");
+    }
+  }, Math.min(remainingMs + 250, 2147483647));
+}
+
+function isMasterAdmin() {
+  return Boolean(state.user && typeof state.user.uid === "string" && state.user.uid === ADMIN_UID);
+}
+
+function hasActiveTempAdminRole() {
+  if (!state.user || !state.user.uid) return false;
+  if (isMasterAdmin()) return false;
+  if (!state.tempAdminGrant || Date.now() >= (state.tempAdminGrant.expiresAt || 0)) {
+    state.tempAdminGrant = null;
+    return false;
+  }
+  return state.tempAdminGrant.uid === state.user.uid;
+}
+
+function isCurrentUserAdmin() {
+  return isMasterAdmin() || hasActiveTempAdminRole();
+}
+
+function isInspectionReadOnlyActive() {
+  return Boolean(isCurrentUserAdmin() && state.adminReadOnly);
 }
 
 /* --------------------------------------------------------------------------
@@ -529,20 +657,19 @@ function ensurePlayerNoticeBannerElement() {
 }
 
 /* --------------------------------------------------------------------------
-   Helpers Exclusivos da Conta Admin: Prompt, Funções Abaixo do Comando e
+   Helpers da Conta Admin: Prompt, Funções Abaixo do Comando e
    Área de Todos os Comandos Ativos
    -------------------------------------------------------------------------- */
-function isCurrentUserAdmin() {
-  return Boolean(state.user && typeof state.user.uid === "string" && state.user.uid === ADMIN_UID);
-}
-
-function isInspectionReadOnlyActive() {
-  return Boolean(isCurrentUserAdmin() && state.adminReadOnly);
-}
-
 function sanitizeTargetUid(rawUid) {
   const clean = sanitizeSingleLine(String(rawUid ?? ""), 128);
   return UID_REGEX.test(clean) ? clean : "";
+}
+
+function getAvailableCommandsForCurrentUser() {
+  if (isMasterAdmin()) {
+    return ADMIN_COMMAND_CATALOG;
+  }
+  return ADMIN_COMMAND_CATALOG.filter((item) => !item.masterOnly);
 }
 
 function appendAdminLog(actionText) {
@@ -582,7 +709,13 @@ function computeSheetDiffList() {
 
   for (let i = 0; i < allKeys.length; i += 1) {
     const key = allKeys[i];
-    if (!isValidFieldKey(key) || key === ADMIN_NOTICE_FIELD_KEY) continue;
+    if (
+      !isValidFieldKey(key) ||
+      key === ADMIN_NOTICE_FIELD_KEY ||
+      key === TEMP_ADMIN_GRANT_FIELD_KEY
+    ) {
+      continue;
+    }
     const oldVal = Object.prototype.hasOwnProperty.call(baseline, key) ? baseline[key] : "";
     const newVal = Object.prototype.hasOwnProperty.call(current, key) ? current[key] : "";
     if (String(oldVal) !== String(newVal)) {
@@ -643,7 +776,7 @@ function loadRecentAdminUidsFromStorage() {
 
 function getActiveTargetUid() {
   if (!state.user || !state.user.uid) return "";
-  if (isCurrentUserAdmin() && state.adminTargetUid) {
+  if (isMasterAdmin() && state.adminTargetUid) {
     return state.adminTargetUid;
   }
   return state.user.uid;
@@ -699,7 +832,8 @@ function resolveCommandNameFromInput(rawInput) {
     return "/ajuda";
   }
 
-  const found = ADMIN_COMMAND_CATALOG.find((item) => item.cmd === normalizedToken);
+  const available = getAvailableCommandsForCurrentUser();
+  const found = available.find((item) => item.cmd === normalizedToken);
   return found ? found.cmd : normalizedToken;
 }
 
@@ -729,14 +863,16 @@ function renderActiveCommandsStrip() {
   strip.innerHTML = "";
 
   const header = document.createElement("div");
-  header.textContent = "Comandos ativos (clique para carregar no prompt e exibir as funções abaixo):";
+  header.textContent = isMasterAdmin()
+    ? "Comandos ativos (clique para carregar no prompt e exibir as funções abaixo):"
+    : "Comandos ativos do admin temporário (sem permissão para adicionar ou remover admin):";
   header.style.cssText = "font-size: 12px; color: #ffd966; font-weight: 600; margin-bottom: 6px;";
   strip.appendChild(header);
 
   const grid = document.createElement("div");
   grid.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px;";
 
-  ADMIN_COMMAND_CATALOG.forEach((item) => {
+  getAvailableCommandsForCurrentUser().forEach((item) => {
     const btn = document.createElement("button");
     btn.type = "button";
     const isSelected = state.adminActiveCommand === item.cmd;
@@ -779,6 +915,17 @@ function renderAdminCommandFunctionsBelow() {
     return;
   }
 
+  if (cmd === "/admin" && !isMasterAdmin()) {
+    box.hidden = false;
+    box.innerHTML = "";
+    const denied = document.createElement("div");
+    denied.textContent =
+      "Administrador temporário não pode adicionar ou remover administradores.";
+    denied.style.cssText = "font-size: 12px; color: #ff8a80; font-weight: 600;";
+    box.appendChild(denied);
+    return;
+  }
+
   box.hidden = false;
   box.innerHTML = "";
 
@@ -786,7 +933,7 @@ function renderAdminCommandFunctionsBelow() {
   titleRow.style.cssText = "display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;";
 
   const title = document.createElement("strong");
-  const spec = ADMIN_COMMAND_CATALOG.find((c) => c.cmd === cmd);
+  const spec = getAvailableCommandsForCurrentUser().find((c) => c.cmd === cmd);
   title.textContent = spec
     ? `Funções do comando ${spec.syntax} — ${spec.desc}`
     : `Funções do comando ${cmd}`;
@@ -805,6 +952,58 @@ function renderAdminCommandFunctionsBelow() {
   titleRow.appendChild(title);
   titleRow.appendChild(hideBtn);
   box.appendChild(titleRow);
+
+  if (cmd === "/admin" && isMasterAdmin()) {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+    const uidInput = document.createElement("input");
+    uidInput.type = "text";
+    uidInput.value = state.adminDraftTempAdminUid || "";
+    uidInput.placeholder = "UID para receber admin temporário...";
+    uidInput.style.cssText = "flex: 1 1 200px; padding: 7px 10px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    uidInput.addEventListener("input", () => {
+      state.adminDraftTempAdminUid = uidInput.value;
+    });
+
+    const durSelect = document.createElement("select");
+    durSelect.style.cssText = "padding: 7px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #ffd966; font-size: 12px; font-weight: 600;";
+    NOTICE_DURATION_PRESETS.forEach((opt) => {
+      const optionEl = document.createElement("option");
+      optionEl.value = String(opt.minutes);
+      optionEl.textContent = opt.label;
+      if (normalizeTempAdminMinutes(state.adminDraftTempAdminMinutes) === opt.minutes) {
+        optionEl.selected = true;
+      }
+      durSelect.appendChild(optionEl);
+    });
+    durSelect.addEventListener("change", () => {
+      state.adminDraftTempAdminMinutes = normalizeTempAdminMinutes(durSelect.value);
+    });
+
+    const grantBtn = document.createElement("button");
+    grantBtn.type = "button";
+    grantBtn.textContent = "Conceder admin (até 24h)";
+    grantBtn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: none; background: #c48b1b; color: #111; font-weight: 700; font-size: 12px; cursor: pointer;";
+    grantBtn.addEventListener("click", () =>
+      handleAdminGrantTempRole({
+        uid: uidInput.value,
+        minutes: durSelect.value
+      })
+    );
+
+    row.appendChild(uidInput);
+    row.appendChild(durSelect);
+    row.appendChild(grantBtn);
+    box.appendChild(row);
+
+    const note = document.createElement("div");
+    note.textContent =
+      "Concedido por até 24h. O administrador temporário não terá opção para adicionar ou remover administradores.";
+    note.style.cssText = "margin-top: 7px; font-size: 11px; color: #b8c2cc;";
+    box.appendChild(note);
+    return;
+  }
 
   if (cmd === "/uid" || cmd === "/minha") {
     const row = document.createElement("div");
@@ -1128,7 +1327,7 @@ function renderAdminCommandFunctionsBelow() {
 
   const helpList = document.createElement("ul");
   helpList.style.cssText = "margin: 0; padding-left: 16px; font-size: 12px; color: #d6dee6;";
-  ADMIN_COMMAND_CATALOG.forEach((item) => {
+  getAvailableCommandsForCurrentUser().forEach((item) => {
     const li = document.createElement("li");
     li.textContent = `${item.syntax} — ${item.desc}`;
     li.style.marginBottom = "3px";
@@ -1156,7 +1355,10 @@ function updateAdminBarUI() {
   if (activeBar) activeBar.hidden = false;
   if (activeBadge) {
     const modeLabel = state.adminReadOnly ? " · SOMENTE LEITURA" : " · Edição ativa";
-    if (state.adminTargetUid && state.adminTargetUid !== state.user.uid) {
+    if (hasActiveTempAdminRole()) {
+      const rem = formatRemainingTimeLabel(state.tempAdminGrant.expiresAt);
+      activeBadge.textContent = `Admin Temporário (${rem}, sem add/remover admin)${modeLabel}`;
+    } else if (state.adminTargetUid && state.adminTargetUid !== state.user.uid) {
       activeBadge.textContent = `Alvo: ${state.adminTargetUid}${modeLabel}`;
     } else {
       activeBadge.textContent = `Alvo: própria conta (${state.user.uid})${modeLabel}`;
@@ -1233,7 +1435,9 @@ function ensureAdminBarElement() {
   const promptInput = document.createElement("input");
   promptInput.type = "text";
   promptInput.id = "admin-prompt-input";
-  promptInput.placeholder = "Digite um comando (ex: /uid, /recado 30 Oi, /ler, /stats, /modelo, /diff, /json, /log)...";
+  promptInput.placeholder = isMasterAdmin()
+    ? "Digite um comando (ex: /admin UID 120, /uid, /recado 30 Oi, /ler, /stats, /modelo, /diff, /json, /log)..."
+    : "Digite um comando (ex: /recado 30 Oi, /ler, /stats, /modelo, /diff, /json, /log)...";
   promptInput.autocomplete = "off";
   promptInput.spellcheck = false;
   promptInput.setAttribute("aria-label", "Prompt de comando do administrador");
@@ -1301,6 +1505,83 @@ function ensureAdminBarElement() {
   promptForm.addEventListener("submit", handleAdminPromptSubmit);
 }
 
+async function handleAdminGrantTempRole(overrideData) {
+  if (!isMasterAdmin() || !state.firebaseReady || !state.db) {
+    setStatusBanner(
+      "Apenas o administrador principal pode conceder função de administrador temporário.",
+      "error"
+    );
+    return;
+  }
+
+  const targetUid = sanitizeTargetUid(
+    overrideData && overrideData.uid !== undefined ? overrideData.uid : state.adminDraftTempAdminUid
+  );
+  if (!targetUid) {
+    setStatusBanner("Informe um UID válido para conceder a função de administrador.", "warning");
+    return;
+  }
+
+  if (targetUid === ADMIN_UID) {
+    setStatusBanner("Este UID já é o administrador principal.", "info");
+    return;
+  }
+
+  const minutes = normalizeTempAdminMinutes(
+    overrideData && overrideData.minutes !== undefined
+      ? overrideData.minutes
+      : state.adminDraftTempAdminMinutes
+  );
+  const encodedGrant = buildEncodedTempAdminGrant(targetUid, minutes, state.user.uid);
+  if (!encodedGrant) {
+    setStatusBanner("Não foi possível gerar a concessão temporária.", "error");
+    return;
+  }
+
+  const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
+  const docRef = doc(state.db, FIRESTORE_COLLECTION, targetUid);
+
+  try {
+    const snap = await getDoc(docRef);
+    const existingFields =
+      snap.exists() && snap.data() && snap.data().fields && typeof snap.data().fields === "object"
+        ? snap.data().fields
+        : createSafeRecord();
+
+    const nextFields = createSafeRecord();
+    Object.entries(existingFields).forEach(([k, v]) => {
+      if (isValidFieldKey(k)) {
+        nextFields[k] = v;
+      }
+    });
+    nextFields[TEMP_ADMIN_GRANT_FIELD_KEY] = encodedGrant;
+
+    await setDoc(docRef, {
+      fields: nextFields,
+      atualizadoEm: new Date().toISOString()
+    });
+    state.lastCloudWriteAt = Date.now();
+
+    state.adminDraftTempAdminUid = "";
+    state.adminDraftTempAdminMinutes = minutes;
+    recordRecentAdminUid(targetUid);
+    appendAdminLog(`Admin temporário (${formatDurationLabel(minutes)}) dado ao UID ${targetUid} (sem add/remover admin)`);
+    renderAdminCommandFunctionsBelow();
+    setStatusBanner(
+      `Função de admin concedida ao UID ${targetUid} por ${formatDurationLabel(minutes)} (sem poder adicionar/remover admin).`,
+      "success"
+    );
+  } catch (err) {
+    const code = err && typeof err.code === "string" ? err.code : "";
+    setStatusBanner(
+      code === "permission-denied"
+        ? "Permissão negada no Firestore ao conceder admin temporário."
+        : "Erro ao salvar admin temporário no Firestore.",
+      "error"
+    );
+  }
+}
+
 async function handleAdminPromptSubmit(event) {
   event.preventDefault();
   if (event && event.isTrusted === false) return;
@@ -1314,6 +1595,28 @@ async function handleAdminPromptSubmit(event) {
   const cmd = resolveCommandNameFromInput(parts[0]);
   state.adminActiveCommand = cmd;
   renderActiveCommandsStrip();
+
+  if (cmd === "/admin") {
+    if (!isMasterAdmin()) {
+      setStatusBanner(
+        "Administrador temporário não tem permissão para adicionar ou remover administradores.",
+        "error"
+      );
+      renderAdminCommandFunctionsBelow();
+      return;
+    }
+    if (parts[1]) {
+      const uidArg = sanitizeTargetUid(parts[1]);
+      const minArg = parts[2] !== undefined ? normalizeTempAdminMinutes(parts[2]) : MAX_TEMP_ADMIN_MINUTES;
+      state.adminDraftTempAdminUid = parts[1];
+      state.adminDraftTempAdminMinutes = minArg;
+      if (uidArg) {
+        await handleAdminGrantTempRole({ uid: uidArg, minutes: minArg });
+      }
+    }
+    renderAdminCommandFunctionsBelow();
+    return;
+  }
 
   if (cmd === "/uid" && parts[1]) {
     state.adminDraftUid = parts[1];
@@ -1438,6 +1741,7 @@ async function handleAdminImportJson(rawJsonText) {
     const safeFields = createSafeRecord();
     Object.entries(parsed.fields).slice(0, 1500).forEach(([k, v]) => {
       if (!isValidFieldKey(k)) return;
+      if (k === TEMP_ADMIN_GRANT_FIELD_KEY && !isMasterAdmin()) return;
       if (typeof v === "boolean") safeFields[k] = v;
       else if (typeof v === "string" || typeof v === "number") safeFields[k] = String(v).slice(0, 5000);
     });
@@ -1519,8 +1823,8 @@ async function handleAdminApplyQuickStats(overrideValues) {
 }
 
 async function handleAdminLoadTargetUid(rawUidOverride) {
-  if (!isCurrentUserAdmin()) {
-    setStatusBanner("Apenas o administrador autorizado pode carregar fichas por UID.", "error");
+  if (!isMasterAdmin()) {
+    setStatusBanner("Apenas o administrador principal pode carregar fichas de outros UIDs.", "error");
     return;
   }
 
@@ -1550,18 +1854,22 @@ async function handleAdminReturnToOwnSheet(event) {
   saveAdminTargetUidToStorage("");
   state.lastSavedSnapshot = "";
   updateAdminBarUI();
-  appendAdminLog("Retornou para a própria ficha do Admin");
+  appendAdminLog("Retornou para a própria ficha");
   setStatusBanner("Voltando para a sua própria ficha...", "info");
   await loadFromFirestore(state.user.uid);
 }
 
 async function handleAdminSendNotice(overrideData) {
   if (!isCurrentUserAdmin() || !state.firebaseReady || !state.db) {
-    setStatusBanner("Apenas o admin conectado ao Firebase pode enviar recados.", "error");
+    setStatusBanner("Apenas um admin conectado ao Firebase pode enviar recados.", "error");
     return;
   }
 
-  const targetUid = sanitizeTargetUid(state.adminTargetUid || state.adminDraftUid || state.user.uid);
+  const targetUid = sanitizeTargetUid(
+    isMasterAdmin()
+      ? state.adminTargetUid || state.adminDraftUid || state.user.uid
+      : state.user.uid
+  );
   if (!targetUid) {
     setStatusBanner("Carregue ou informe um UID válido para enviar a mensagem.", "warning");
     return;
@@ -1579,9 +1887,11 @@ async function handleAdminSendNotice(overrideData) {
     return;
   }
 
-  state.adminTargetUid = targetUid;
-  saveAdminTargetUidToStorage(targetUid);
-  recordRecentAdminUid(targetUid);
+  if (isMasterAdmin()) {
+    state.adminTargetUid = targetUid;
+    saveAdminTargetUidToStorage(targetUid);
+    recordRecentAdminUid(targetUid);
+  }
 
   const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
   const docRef = doc(state.db, FIRESTORE_COLLECTION, targetUid);
@@ -1635,7 +1945,11 @@ async function handleAdminClearNotice(event) {
   if (event && event.isTrusted === false) return;
   if (!isCurrentUserAdmin() || !state.firebaseReady || !state.db) return;
 
-  const targetUid = sanitizeTargetUid(state.adminTargetUid || state.adminDraftUid || state.user.uid);
+  const targetUid = sanitizeTargetUid(
+    isMasterAdmin()
+      ? state.adminTargetUid || state.adminDraftUid || state.user.uid
+      : state.user.uid
+  );
   if (!targetUid) {
     setStatusBanner("Informe um UID válido para remover o recado.", "warning");
     return;
@@ -1964,6 +2278,8 @@ function updateScreenAccess() {
 function enterOfflineTemporaryMode() {
   state.offlineMode = true;
   state.activeNotice = null;
+  state.tempAdminGrant = null;
+  scheduleTempAdminExpiryCheck();
   state.lastSavedSnapshot = "";
   clearAuthSensitiveInputs();
   setEntradaStatus("");
@@ -2039,6 +2355,20 @@ function collectSheetData() {
     }
   }
 
+  if (state.tempAdminGrant && Date.now() < (state.tempAdminGrant.expiresAt || 0)) {
+    const remainingMin = Math.max(
+      1,
+      Math.min(MAX_TEMP_ADMIN_MINUTES, Math.ceil((state.tempAdminGrant.expiresAt - Date.now()) / 60000))
+    );
+    fields[TEMP_ADMIN_GRANT_FIELD_KEY] = JSON.stringify({
+      uid: state.tempAdminGrant.uid,
+      grantedBy: ADMIN_UID,
+      minutes: remainingMin,
+      grantedAt: state.tempAdminGrant.grantedAt,
+      expiresAt: state.tempAdminGrant.expiresAt
+    });
+  }
+
   return {
     fields,
     atualizadoEm: new Date().toISOString()
@@ -2070,6 +2400,14 @@ function buildSanitizedCloudPayload() {
         continue;
       }
 
+      if (key === TEMP_ADMIN_GRANT_FIELD_KEY && typeof val === "string") {
+        const parsedGrant = parseTempAdminGrantFromFields({ [TEMP_ADMIN_GRANT_FIELD_KEY]: val });
+        if (parsedGrant) {
+          cleanFields[key] = JSON.stringify(parsedGrant);
+        }
+        continue;
+      }
+
       if (typeof val === "boolean") {
         cleanFields[key] = val;
       } else if (typeof val === "number" && Number.isFinite(val)) {
@@ -2091,22 +2429,32 @@ function buildSanitizedCloudPayload() {
   };
 }
 
-function applySheetData(data) {
+function applySheetData(data, expectedUidForGrant = "") {
   if (!data || typeof data !== "object" || !data.fields || typeof data.fields !== "object") {
     state.activeNotice = null;
+    state.tempAdminGrant = null;
     scheduleNoticeExpiryCheck();
+    scheduleTempAdminExpiryCheck();
     renderPlayerNoticeBanner();
     recalculateSkillsTable();
     syncNenCategoryFromSelect();
     syncAdminQuickInputsFromSheet();
     captureBaselineFields(collectSheetData().fields);
-    renderAdminCommandFunctionsBelow();
+    updateAdminBarUI();
     return;
   }
 
   state.activeNotice = parseActiveNoticeFromFields(data.fields);
   scheduleNoticeExpiryCheck();
   renderPlayerNoticeBanner();
+
+  if (expectedUidForGrant && expectedUidForGrant !== ADMIN_UID) {
+    state.tempAdminGrant = parseTempAdminGrantFromFields(data.fields, expectedUidForGrant);
+    scheduleTempAdminExpiryCheck();
+  } else if (expectedUidForGrant === ADMIN_UID) {
+    state.tempAdminGrant = null;
+    scheduleTempAdminExpiryCheck();
+  }
 
   const mainEl = document.querySelector("main.container");
   if (!mainEl) return;
@@ -2132,8 +2480,7 @@ function applySheetData(data) {
   state.lastSavedSnapshot = computeFieldsSnapshot(normalizedFields);
   syncNenCategoryFromSelect();
   syncAdminQuickInputsFromSheet();
-  applySheetReadOnlyState();
-  renderAdminCommandFunctionsBelow();
+  updateAdminBarUI();
 }
 
 function resetSheetFieldsToDefault() {
@@ -2314,6 +2661,8 @@ async function initFirebase() {
       if (user) {
         state.offlineMode = false;
         if (user.uid === ADMIN_UID) {
+          state.tempAdminGrant = null;
+          scheduleTempAdminExpiryCheck();
           state.adminTargetUid = loadAdminTargetUidFromStorage();
           state.adminDraftUid = state.adminTargetUid;
           state.adminRecentUids = loadRecentAdminUidsFromStorage();
@@ -2337,7 +2686,9 @@ async function initFirebase() {
         state.adminActiveCommand = "";
         state.adminAllCommandsActive = false;
         state.activeNotice = null;
+        state.tempAdminGrant = null;
         scheduleNoticeExpiryCheck();
+        scheduleTempAdminExpiryCheck();
         saveAdminTargetUidToStorage("");
       }
       updateAuthUI();
@@ -2346,7 +2697,7 @@ async function initFirebase() {
       if (user) {
         if (!state.isDeleting) {
           const targetUid = getActiveTargetUid();
-          const isRemoteTarget = user.uid === ADMIN_UID && targetUid && targetUid !== user.uid;
+          const isRemoteTarget = isMasterAdmin() && targetUid && targetUid !== user.uid;
           setStatusBanner(
             isRemoteTarget
               ? `Admin conectado. Carregando ficha do UID ${targetUid}...`
@@ -2376,19 +2727,23 @@ async function loadFromFirestore(uid) {
 
     if (snap.exists()) {
       const cloudData = snap.data();
-      applySheetData(cloudData);
-      if (!isCurrentUserAdmin() || uid === state.user?.uid) {
+      applySheetData(cloudData, uid);
+      if (!isMasterAdmin() || uid === state.user?.uid) {
         saveLocalData(cloudData);
       }
       setStatusBanner(
-        isCurrentUserAdmin() && uid !== state.user?.uid
+        isMasterAdmin() && uid !== state.user?.uid
           ? `Ficha carregada do UID alvo (${uid}).`
-          : "Ficha carregada do banco de dados Firebase.",
+          : hasActiveTempAdminRole()
+            ? "Ficha carregada (Admin Temporário ativo, sem poder adicionar/remover admin)."
+            : "Ficha carregada do banco de dados Firebase.",
         "success"
       );
     } else {
       state.activeNotice = null;
+      state.tempAdminGrant = null;
       scheduleNoticeExpiryCheck();
+      scheduleTempAdminExpiryCheck();
       renderPlayerNoticeBanner();
       resetSheetFieldsToDefault();
       const initialData = buildSanitizedCloudPayload();
@@ -2396,12 +2751,12 @@ async function loadFromFirestore(uid) {
       captureBaselineFields(initialData.fields);
       state.lastSavedSnapshot = computeFieldsSnapshot(initialData.fields);
       state.lastCloudWriteAt = Date.now();
-      if (!isCurrentUserAdmin() || uid === state.user?.uid) {
+      if (!isMasterAdmin() || uid === state.user?.uid) {
         saveLocalData(initialData);
       }
-      renderAdminCommandFunctionsBelow();
+      updateAdminBarUI();
       setStatusBanner(
-        isCurrentUserAdmin() && uid !== state.user?.uid
+        isMasterAdmin() && uid !== state.user?.uid
           ? `Nova ficha criada para o UID alvo (${uid}).`
           : "Nova ficha criada na sua conta do Firebase.",
         "success"
@@ -2443,7 +2798,7 @@ async function handleClearSheetData(event) {
   }
 
   const targetUid = getActiveTargetUid();
-  const isRemoteTarget = Boolean(isCurrentUserAdmin() && targetUid && targetUid !== state.user?.uid);
+  const isRemoteTarget = Boolean(isMasterAdmin() && targetUid && targetUid !== state.user?.uid);
 
   state.activeNotice = null;
   scheduleNoticeExpiryCheck();
@@ -2534,7 +2889,9 @@ async function handleLogout(event) {
   state.adminActiveCommand = "";
   state.adminAllCommandsActive = false;
   state.activeNotice = null;
+  state.tempAdminGrant = null;
   scheduleNoticeExpiryCheck();
+  scheduleTempAdminExpiryCheck();
   saveAdminTargetUidToStorage("");
   state.lastSavedSnapshot = "";
   clearAuthSensitiveInputs();
@@ -2583,7 +2940,9 @@ async function handleDeleteAccount(event) {
     state.adminActiveCommand = "";
     state.adminAllCommandsActive = false;
     state.activeNotice = null;
+    state.tempAdminGrant = null;
     scheduleNoticeExpiryCheck();
+    scheduleTempAdminExpiryCheck();
     saveAdminTargetUidToStorage("");
     state.lastSavedSnapshot = "";
 
@@ -2631,7 +2990,7 @@ async function persistSheet(forceWrite = false) {
     }
 
     const targetUid = getActiveTargetUid();
-    const isRemoteTarget = Boolean(isCurrentUserAdmin() && targetUid && targetUid !== state.user?.uid);
+    const isRemoteTarget = Boolean(isMasterAdmin() && targetUid && targetUid !== state.user?.uid);
 
     if (!isRemoteTarget) {
       saveLocalData(payload);
