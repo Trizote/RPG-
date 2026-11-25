@@ -708,25 +708,63 @@ function hasValidFirebaseConfig(cfg) {
 }
 
 function mapFirebaseAuthError(err) {
-  const code = err && typeof err.code === "string" ? err.code : "sem-codigo";
-  const rawMsg = err && typeof err.message === "string" ? err.message : String(err || "");
-  const detalheTecnico = `[${code}]: ${rawMsg}`;
-
+  const code = err && typeof err.code === "string" ? err.code : "";
   switch (code) {
     case "auth/invalid-email":
-      return `Formato de e-mail inválido ${detalheTecnico}`;
+      return "Formato de e-mail inválido.";
     case "auth/user-not-found":
     case "auth/wrong-password":
     case "auth/invalid-credential":
-      return `E-mail ou senha incorretos ${detalheTecnico}`;
+      return "E-mail ou senha incorretos.";
     case "auth/email-already-in-use":
-      return `Este e-mail já está cadastrado. Alterne para Entrar ${detalheTecnico}`;
+      return "Este e-mail já está cadastrado. Alterne para Entrar.";
     case "auth/weak-password":
-      return `Escolha uma senha mais forte (mínimo de 6 caracteres) ${detalheTecnico}`;
+      return "Escolha uma senha mais forte (mínimo de 6 caracteres).";
     case "auth/too-many-requests":
-      return `Muitas tentativas seguidas. Aguarde alguns instantes e tente novamente ${detalheTecnico}`;
+      return "Muitas tentativas seguidas. Aguarde alguns instantes e tente novamente.";
+    case "auth/network-request-failed":
+      return "Erro de conexão ou bloqueio no GitHub Pages ao falar com o servidor.";
     default:
-      return `Não foi possível autenticar ${detalheTecnico}`;
+      return "Não foi possível autenticar. Confira e-mail, senha e o método E-mail/Senha no Firebase.";
+  }
+}
+
+function formatDatabaseOrHostingError(err) {
+  const code = err && typeof err.code === "string" ? err.code : "";
+  if (navigator.onLine === false) {
+    return "Sem conexão com a internet no momento. Verifique sua rede ou use o modo offline/local.";
+  }
+  if (code === "permission-denied") {
+    return "Erro no banco de dados (Firestore): permissão negada pelas regras de segurança.";
+  }
+  if (code === "unavailable" || code === "deadline-exceeded") {
+    return "Erro no banco de dados (Firestore): serviço temporariamente indisponível ou sem resposta.";
+  }
+  if (code === "failed-precondition") {
+    return "Erro no banco de dados (Firestore): pré-condição ou índice pendente no projeto.";
+  }
+  if (code === "auth/network-request-failed") {
+    return "Erro de rede / GitHub Pages ao comunicar com o Firebase.";
+  }
+  return "Não foi possível conectar ao banco de dados ou ao servidor do GitHub Pages ao tentar autenticar.";
+}
+
+async function checkEnvironmentAndFirestoreBeforeLogin() {
+  if (navigator.onLine === false) {
+    throw Object.assign(new Error("Offline"), { code: "offline-browser" });
+  }
+  if (state.db && state.firebaseModules && state.firebaseModules.firestoreMod) {
+    const { doc, getDoc } = state.firebaseModules.firestoreMod;
+    const probeRef = doc(state.db, FIRESTORE_COLLECTION, "__login_check__");
+    try {
+      await getDoc(probeRef);
+    } catch (dbErr) {
+      const dbCode = dbErr && typeof dbErr.code === "string" ? dbErr.code : "";
+      // Em documento inexistente com regras restritas ao dono, permission-denied ou not-found indicam que o Firestore respondeu
+      if (dbCode === "unavailable" || dbCode === "deadline-exceeded" || dbCode === "failed-precondition") {
+        throw dbErr;
+      }
+    }
   }
 }
 
@@ -772,11 +810,9 @@ async function initFirebase() {
         setStatusBanner("Faça login para salvar e carregar sua ficha no Firebase.", "info");
       }
     });
-  } catch (err) {
-    const code = err && typeof err.code === "string" ? err.code : "init-error";
-    const msg = err && typeof err.message === "string" ? err.message : String(err || "");
+  } catch {
     setEntradaStatus(
-      `Falha ao iniciar Firebase [${code}]: ${msg}. Você pode entrar offline/local.`
+      "Falha ao carregar recursos no GitHub Pages ou conectar ao Firebase. Você pode entrar offline/local."
     );
   }
 }
@@ -802,10 +838,8 @@ async function loadFromFirestore(uid) {
       saveLocalData(initialData);
       setStatusBanner("Nova ficha criada na sua conta do Firebase.", "success");
     }
-  } catch (err) {
-    const code = err && typeof err.code === "string" ? err.code : "firestore-read";
-    const msg = err && typeof err.message === "string" ? err.message : String(err || "");
-    setStatusBanner(`Erro ao ler Firebase [${code}]: ${msg}`, "error");
+  } catch {
+    setStatusBanner("Erro ao ler dados do Firebase. Verifique as regras do Firestore.", "error");
   }
 }
 
@@ -855,7 +889,7 @@ async function handleAuthSubmit(event) {
   event.preventDefault();
   if (event && event.isTrusted === false) return;
   if (!state.firebaseReady || !state.auth) {
-    setEntradaStatus("Firebase ainda não foi inicializado.");
+    setEntradaStatus("Firebase ainda não foi inicializado ou houve falha no carregamento do GitHub Pages.");
     return;
   }
 
@@ -873,6 +907,7 @@ async function handleAuthSubmit(event) {
 
   try {
     setEntradaStatus(state.authMode === "register" ? "Criando conta..." : "Entrando...");
+    await checkEnvironmentAndFirestoreBeforeLogin();
     if (state.authMode === "register") {
       await createUserWithEmailAndPassword(state.auth, email, password);
     } else {
@@ -880,8 +915,20 @@ async function handleAuthSubmit(event) {
     }
     clearAuthSensitiveInputs();
   } catch (err) {
-    console.error("Erro de autenticação Firebase:", err);
-    setEntradaStatus(mapFirebaseAuthError(err));
+    const code = err && typeof err.code === "string" ? err.code : "";
+    if (
+      navigator.onLine === false ||
+      code === "offline-browser" ||
+      code === "unavailable" ||
+      code === "deadline-exceeded" ||
+      code === "failed-precondition" ||
+      code === "permission-denied" ||
+      code === "auth/network-request-failed"
+    ) {
+      setEntradaStatus(formatDatabaseOrHostingError(err));
+    } else {
+      setEntradaStatus(mapFirebaseAuthError(err));
+    }
   }
 }
 
