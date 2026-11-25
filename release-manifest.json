@@ -1,0 +1,19 @@
+{
+  "version": "2026.11.25.2045-inicial",
+  "publishedAt": "2026-11-25T20:45:00-03:00",
+  "filesUpdated": [
+    "index.html",
+    "style.css",
+    "script.js",
+    ".github/workflows/update-manifest.yml"
+  ],
+  "addedFunctions": [
+    "Detecção automática de nova versão de HTML, CSS e JS ao abrir o site",
+    "Validação de funcionamento dos elementos e funções principais no carregamento",
+    "Aviso exclusivo na conta Master listando novas funções e melhorias"
+  ],
+  "improvements": [
+    "Workflow no GitHub Actions para atualizar a versão automaticamente a cada push",
+    "Botão para marcar a atualização como conferida após verificar o site"
+  ]
+}

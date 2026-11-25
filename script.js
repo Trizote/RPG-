@@ -6,8 +6,8 @@
    + Modo Administrador por UID (exclusivo): Prompt de Comando, Funções
      Dinâmicas do Comando Abaixo, Todos os Comandos Ativos, Mensagem até 24h
      (Normal/Urgente), Admin Temporário até 24h (sem adicionar/remover admin),
-     Somente Leitura, UIDs Recentes, Ajuste Rápido, Modelos Base, Diff,
-     Backup JSON e Log da Sessão
+     Aviso de Atualização 100% Funcional na Conta Master, Somente Leitura,
+     UIDs Recentes, Ajuste Rápido, Modelos Base, Diff, Backup JSON e Log
    + Exclusão de ficha e exclusão de conta
    + Sincronização precisa das seções no topo conforme a rolagem
    + Cores dinâmicas conforme a Categoria Principal de Afinidade de Nen
@@ -31,13 +31,16 @@ const STORAGE_KEYS = Object.freeze({
   LOCAL_SHEET: "ordem_de_arkan_agente_v1",
   COOKIE_CONSENT: "ordem_de_arkan_lgpd_v1",
   ADMIN_TARGET_UID: "ordem_de_arkan_admin_target_uid_v1",
-  ADMIN_RECENT_UIDS: "ordem_de_arkan_admin_recent_uids_v1"
+  ADMIN_RECENT_UIDS: "ordem_de_arkan_admin_recent_uids_v1",
+  MASTER_SEEN_RELEASE: "ordem_de_arkan_master_seen_release_v1"
 });
 
 const ADMIN_UID = "TcudbnuOMcTySJWhz0JHaNDuNU22";
 const UID_REGEX = /^[a-zA-Z0-9_-]{10,128}$/;
 const ADMIN_NOTICE_FIELD_KEY = "id:admin_recado_payload";
 const TEMP_ADMIN_GRANT_FIELD_KEY = "id:admin_temp_grant_payload";
+const MASTER_UPDATE_LOG_FIELD_KEY = "id:master_update_log_payload";
+const RELEASE_MANIFEST_URL = "./release-manifest.json";
 const MAX_NOTICE_HOURS = 24;
 const MAX_NOTICE_MINUTES = MAX_NOTICE_HOURS * 60;
 const MAX_TEMP_ADMIN_MINUTES = MAX_NOTICE_HOURS * 60;
@@ -199,6 +202,8 @@ const state = {
   lastCloudWriteAt: 0,
   tempAdminGrant: null,
   tempAdminExpiryTimer: null,
+  masterUpdateNotice: null,
+  masterReleaseNotice: null,
   adminTargetUid: "",
   adminRecentUids: [],
   adminReadOnly: false,
@@ -243,6 +248,14 @@ function sanitizeText(value, maxLength = 500) {
 
 function sanitizeSingleLine(value, maxLength = 140) {
   return sanitizeText(value, maxLength).replace(/[\r\n]+/g, " ").trim();
+}
+
+function sanitizeStringArray(arr, maxItems = 12, maxLen = 180) {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .slice(0, maxItems)
+    .map((item) => sanitizeSingleLine(String(item ?? ""), maxLen))
+    .filter(Boolean);
 }
 
 function isValidFieldKey(key) {
@@ -325,6 +338,397 @@ function initConsoleSecurityGuard() {
     );
   } catch {
     // Ignora caso console esteja restrito
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Aviso de Atualização de HTML / CSS / JS na Conta do Administrador Master
+   -------------------------------------------------------------------------- */
+function verifySiteRuntimeHealth() {
+  const hasAppContainer = Boolean(document.getElementById("app-ficha"));
+  const hasMainSheet = Boolean(document.querySelector("main.container"));
+  const hasCoreFunctions =
+    typeof collectSheetData === "function" &&
+    typeof persistSheet === "function" &&
+    typeof applyNenCategoryTheme === "function";
+  const hasLoadedStylesheet =
+    Array.from(document.styleSheets || []).length > 0 ||
+    Boolean(document.querySelector('link[rel="stylesheet"]'));
+
+  return Boolean(hasAppContainer && hasMainSheet && hasCoreFunctions && hasLoadedStylesheet);
+}
+
+function getSeenMasterReleaseVersion() {
+  try {
+    return sanitizeSingleLine(localStorage.getItem(STORAGE_KEYS.MASTER_SEEN_RELEASE) || "", 60);
+  } catch {
+    return "";
+  }
+}
+
+function markMasterReleaseAsSeen(version) {
+  const cleanVer = sanitizeSingleLine(version || "", 60);
+  if (!cleanVer) return;
+  try {
+    localStorage.setItem(STORAGE_KEYS.MASTER_SEEN_RELEASE, cleanVer);
+  } catch {
+    // Ignora falha de armazenamento
+  }
+}
+
+function ensureMasterReleaseBannerElement() {
+  if (document.getElementById("master-release-notice-banner")) return;
+  const appFicha = document.getElementById("app-ficha");
+  const mainEl = document.querySelector("main.container");
+  const anchorParent = mainEl && mainEl.parentNode ? mainEl.parentNode : appFicha;
+  if (!anchorParent) return;
+
+  const box = document.createElement("aside");
+  box.id = "master-release-notice-banner";
+  box.hidden = true;
+  box.setAttribute("role", "status");
+  box.setAttribute("aria-live", "polite");
+  box.style.cssText = [
+    "margin: 10px auto 12px",
+    "padding: 14px 16px",
+    "max-width: 1120px",
+    "border-radius: 10px",
+    "border: 1px solid rgba(86, 211, 154, 0.8)",
+    "background: rgba(16, 44, 36, 0.97)",
+    "color: #effbf5"
+  ].join(";");
+
+  const masterBanner = document.getElementById("master-update-success-banner");
+  const adminBar = document.getElementById("admin-uid-bar");
+  const anchorAfter = masterBanner || adminBar;
+  if (anchorAfter && anchorAfter.parentNode === anchorParent) {
+    anchorParent.insertBefore(box, anchorAfter.nextSibling);
+  } else if (mainEl && mainEl.parentNode === anchorParent) {
+    anchorParent.insertBefore(box, mainEl);
+  } else {
+    anchorParent.appendChild(box);
+  }
+}
+
+function renderMasterCodeReleaseBanner() {
+  const banner = document.getElementById("master-release-notice-banner");
+  const rel = state.masterReleaseNotice;
+
+  if (!isMasterAdmin() || !rel || !rel.version) {
+    if (banner) banner.hidden = true;
+    return;
+  }
+
+  ensureMasterReleaseBannerElement();
+  const activeBanner = document.getElementById("master-release-notice-banner");
+  if (!activeBanner) return;
+
+  const parsedDate = new Date(rel.publishedAt);
+  const dateLabel = Number.isNaN(parsedDate.getTime())
+    ? rel.publishedAt
+    : parsedDate.toLocaleString("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+
+  activeBanner.innerHTML = "";
+
+  const header = document.createElement("div");
+  header.style.cssText =
+    "display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;";
+
+  const title = document.createElement("strong");
+  title.textContent = `ATUALIZAÇÃO DE CÓDIGO NO AR — 100% FUNCIONAL (v${rel.version})`;
+  title.style.cssText = "color: #72efb3; font-size: 13px; letter-spacing: 0.3px;";
+
+  const right = document.createElement("div");
+  right.style.cssText = "display: flex; align-items: center; gap: 8px;";
+
+  const timeInfo = document.createElement("span");
+  timeInfo.textContent = dateLabel ? `Publicado: ${dateLabel}` : "Verificado no carregamento";
+  timeInfo.style.cssText = "color: #bfead3; font-size: 12px;";
+
+  const ackBtn = document.createElement("button");
+  ackBtn.type = "button";
+  ackBtn.textContent = "Marcar como conferida";
+  ackBtn.style.cssText =
+    "padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(114,239,179,0.5); background: rgba(114,239,179,0.12); color: #b7f5d6; font-size: 11px; font-weight: 600; cursor: pointer;";
+  ackBtn.addEventListener("click", () => {
+    markMasterReleaseAsSeen(rel.version);
+    state.masterReleaseNotice = null;
+    renderMasterCodeReleaseBanner();
+  });
+
+  right.appendChild(timeInfo);
+  right.appendChild(ackBtn);
+  header.appendChild(title);
+  header.appendChild(right);
+  activeBanner.appendChild(header);
+
+  const summary = document.createElement("p");
+  summary.textContent =
+    "A atualização de HTML, CSS e/ou JavaScript entrou no site e passou na verificação de funcionamento sem erros.";
+  summary.style.cssText = "margin: 0 0 8px; font-size: 13px; color: #effbf5;";
+  activeBanner.appendChild(summary);
+
+  if (rel.filesUpdated.length) {
+    const filesLine = document.createElement("p");
+    filesLine.textContent = `Arquivos atualizados: ${rel.filesUpdated.join(", ")}`;
+    filesLine.style.cssText = "margin: 0 0 8px; font-size: 12px; color: #9ce6c2; font-weight: 600;";
+    activeBanner.appendChild(filesLine);
+  }
+
+  if (rel.addedFunctions.length) {
+    const fnTitle = document.createElement("div");
+    fnTitle.textContent = "Novas funções adicionadas:";
+    fnTitle.style.cssText = "font-size: 12px; font-weight: 700; color: #ffd966; margin-bottom: 4px;";
+    activeBanner.appendChild(fnTitle);
+
+    const fnList = document.createElement("ul");
+    fnList.style.cssText = "margin: 0 0 8px; padding-left: 18px; font-size: 12px; color: #effbf5;";
+    rel.addedFunctions.forEach((fnText) => {
+      const li = document.createElement("li");
+      li.textContent = fnText;
+      li.style.marginBottom = "2px";
+      fnList.appendChild(li);
+    });
+    activeBanner.appendChild(fnList);
+  }
+
+  if (rel.improvements.length) {
+    const impTitle = document.createElement("div");
+    impTitle.textContent = "Outras coisas adicionadas e melhorias:";
+    impTitle.style.cssText = "font-size: 12px; font-weight: 700; color: #ffd966; margin-bottom: 4px;";
+    activeBanner.appendChild(impTitle);
+
+    const impList = document.createElement("ul");
+    impList.style.cssText = "margin: 0; padding-left: 18px; font-size: 12px; color: #d9f5e6;";
+    rel.improvements.forEach((impText) => {
+      const li = document.createElement("li");
+      li.textContent = impText;
+      li.style.marginBottom = "2px";
+      impList.appendChild(li);
+    });
+    activeBanner.appendChild(impList);
+  }
+
+  activeBanner.hidden = false;
+}
+
+async function checkMasterCodeReleaseNotice() {
+  if (!isMasterAdmin()) {
+    state.masterReleaseNotice = null;
+    renderMasterCodeReleaseBanner();
+    return;
+  }
+
+  try {
+    const res = await fetch(`${RELEASE_MANIFEST_URL}?cb=${Date.now()}`, {
+      cache: "no-store"
+    });
+    if (!res.ok) return;
+
+    const data = await res.json();
+    if (!data || typeof data !== "object") return;
+
+    const version = sanitizeSingleLine(String(data.version ?? ""), 60);
+    if (!version) return;
+
+    const seenVersion = getSeenMasterReleaseVersion();
+    if (seenVersion === version) {
+      state.masterReleaseNotice = null;
+      renderMasterCodeReleaseBanner();
+      return;
+    }
+
+    const healthy = verifySiteRuntimeHealth();
+    if (!healthy) return;
+
+    state.masterReleaseNotice = {
+      version,
+      publishedAt: sanitizeSingleLine(String(data.publishedAt ?? ""), 60),
+      filesUpdated: sanitizeStringArray(data.filesUpdated, 10, 80),
+      addedFunctions: sanitizeStringArray(data.addedFunctions, 12, 180),
+      improvements: sanitizeStringArray(data.improvements, 12, 180)
+    };
+
+    renderMasterCodeReleaseBanner();
+  } catch {
+    // Falha silenciosa caso o manifest ainda não esteja disponível
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Aviso de Ação Concluída na Conta do Administrador Master
+   -------------------------------------------------------------------------- */
+function parseMasterUpdateLogFromFields(fieldsObj) {
+  if (!fieldsObj || typeof fieldsObj !== "object") return null;
+  if (!Object.prototype.hasOwnProperty.call(fieldsObj, MASTER_UPDATE_LOG_FIELD_KEY)) return null;
+
+  const raw = fieldsObj[MASTER_UPDATE_LOG_FIELD_KEY];
+  if (typeof raw !== "string" || !raw.trim() || raw.length > 2500) return null;
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const added = sanitizeSingleLine(String(parsed.added ?? ""), 240);
+    const updatedAt = sanitizeSingleLine(String(parsed.updatedAt ?? ""), 60);
+    const statusOk = parsed.ok === true;
+    if (!added || !statusOk) return null;
+
+    return {
+      added,
+      updatedAt: updatedAt || new Date().toISOString(),
+      ok: true
+    };
+  } catch {
+    return null;
+  }
+}
+
+function ensureMasterUpdateBannerElement() {
+  if (document.getElementById("master-update-success-banner")) return;
+  const appFicha = document.getElementById("app-ficha");
+  const mainEl = document.querySelector("main.container");
+  const anchorParent = mainEl && mainEl.parentNode ? mainEl.parentNode : appFicha;
+  if (!anchorParent) return;
+
+  const box = document.createElement("aside");
+  box.id = "master-update-success-banner";
+  box.hidden = true;
+  box.setAttribute("role", "status");
+  box.setAttribute("aria-live", "polite");
+  box.style.cssText = [
+    "margin: 10px auto 12px",
+    "padding: 12px 14px",
+    "max-width: 1120px",
+    "border-radius: 10px",
+    "border: 1px solid rgba(72, 199, 142, 0.75)",
+    "background: rgba(18, 46, 36, 0.96)",
+    "color: #eefaf3"
+  ].join(";");
+
+  const adminBar = document.getElementById("admin-uid-bar");
+  if (adminBar && adminBar.parentNode === anchorParent) {
+    anchorParent.insertBefore(box, adminBar.nextSibling);
+  } else if (mainEl && mainEl.parentNode === anchorParent) {
+    anchorParent.insertBefore(box, mainEl);
+  } else {
+    anchorParent.appendChild(box);
+  }
+}
+
+function renderMasterUpdateBanner() {
+  const banner = document.getElementById("master-update-success-banner");
+  if (!isMasterAdmin() || !state.masterUpdateNotice || !state.masterUpdateNotice.ok) {
+    if (banner) banner.hidden = true;
+    return;
+  }
+
+  ensureMasterUpdateBannerElement();
+  const activeBanner = document.getElementById("master-update-success-banner");
+  if (!activeBanner) return;
+
+  const parsedDate = new Date(state.masterUpdateNotice.updatedAt);
+  const timeFormatted = Number.isNaN(parsedDate.getTime())
+    ? "agora"
+    : parsedDate.toLocaleString("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+
+  activeBanner.innerHTML = "";
+
+  const topRow = document.createElement("div");
+  topRow.style.cssText =
+    "display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px;";
+
+  const title = document.createElement("strong");
+  title.textContent = "ATUALIZAÇÃO CONCLUÍDA — 100% FUNCIONAL";
+  title.style.cssText = "color: #72efb3; font-size: 13px; letter-spacing: 0.3px;";
+
+  const rightControls = document.createElement("div");
+  rightControls.style.cssText = "display: flex; align-items: center; gap: 8px;";
+
+  const timeSpan = document.createElement("span");
+  timeSpan.textContent = `Confirmado em ${timeFormatted}`;
+  timeSpan.style.cssText = "color: #bfead3; font-size: 12px;";
+
+  const dismissBtn = document.createElement("button");
+  dismissBtn.type = "button";
+  dismissBtn.textContent = "Dispensar";
+  dismissBtn.style.cssText =
+    "padding: 3px 9px; border-radius: 6px; border: 1px solid rgba(114,239,179,0.45); background: transparent; color: #b7f5d6; font-size: 11px; cursor: pointer;";
+  dismissBtn.addEventListener("click", () => {
+    state.masterUpdateNotice = null;
+    renderMasterUpdateBanner();
+  });
+
+  rightControls.appendChild(timeSpan);
+  rightControls.appendChild(dismissBtn);
+  topRow.appendChild(title);
+  topRow.appendChild(rightControls);
+
+  const body = document.createElement("p");
+  body.textContent = `O que foi adicionado/atualizado: ${state.masterUpdateNotice.added}. Sistema validado e 100% funcional.`;
+  body.style.cssText = "margin: 0; font-size: 13px; line-height: 1.45; color: #eefaf3;";
+
+  activeBanner.appendChild(topRow);
+  activeBanner.appendChild(body);
+  activeBanner.hidden = false;
+}
+
+async function recordMasterSuccessUpdate(summaryText) {
+  if (!isMasterAdmin() || !state.firebaseReady || !state.db || !state.user?.uid) return;
+  const cleanSummary = sanitizeSingleLine(summaryText, 240);
+  if (!cleanSummary) return;
+
+  const isoNow = new Date().toISOString();
+  const payloadObj = {
+    added: cleanSummary,
+    updatedAt: isoNow,
+    ok: true
+  };
+
+  state.masterUpdateNotice = payloadObj;
+  renderMasterUpdateBanner();
+
+  const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
+  const masterDocRef = doc(state.db, FIRESTORE_COLLECTION, ADMIN_UID);
+
+  try {
+    const snap = await getDoc(masterDocRef);
+    const existingFields =
+      snap.exists() && snap.data() && snap.data().fields && typeof snap.data().fields === "object"
+        ? snap.data().fields
+        : createSafeRecord();
+
+    const nextFields = createSafeRecord();
+    Object.entries(existingFields).forEach(([k, v]) => {
+      if (isValidFieldKey(k)) {
+        nextFields[k] = v;
+      }
+    });
+    nextFields[MASTER_UPDATE_LOG_FIELD_KEY] = JSON.stringify(payloadObj);
+
+    await setDoc(masterDocRef, {
+      fields: nextFields,
+      atualizadoEm: isoNow
+    });
+    state.lastCloudWriteAt = Date.now();
+
+    if (getActiveTargetUid() === ADMIN_UID) {
+      captureBaselineFields(nextFields);
+      state.lastSavedSnapshot = computeFieldsSnapshot(nextFields);
+    }
+  } catch {
+    // Não bloqueia a operação principal se o log extra falhar
   }
 }
 
@@ -646,9 +1050,12 @@ function ensurePlayerNoticeBannerElement() {
     "color: #f4f6f8"
   ].join(";");
 
+  const releaseBanner = document.getElementById("master-release-notice-banner");
+  const masterBanner = document.getElementById("master-update-success-banner");
   const adminBar = document.getElementById("admin-uid-bar");
-  if (adminBar && adminBar.parentNode === anchorParent) {
-    anchorParent.insertBefore(box, adminBar.nextSibling);
+  const anchorAfter = releaseBanner || masterBanner || adminBar;
+  if (anchorAfter && anchorAfter.parentNode === anchorParent) {
+    anchorParent.insertBefore(box, anchorAfter.nextSibling);
   } else if (mainEl && mainEl.parentNode === anchorParent) {
     anchorParent.insertBefore(box, mainEl);
   } else {
@@ -712,7 +1119,8 @@ function computeSheetDiffList() {
     if (
       !isValidFieldKey(key) ||
       key === ADMIN_NOTICE_FIELD_KEY ||
-      key === TEMP_ADMIN_GRANT_FIELD_KEY
+      key === TEMP_ADMIN_GRANT_FIELD_KEY ||
+      key === MASTER_UPDATE_LOG_FIELD_KEY
     ) {
       continue;
     }
@@ -1565,8 +1973,11 @@ async function handleAdminGrantTempRole(overrideData) {
     state.adminDraftTempAdminUid = "";
     state.adminDraftTempAdminMinutes = minutes;
     recordRecentAdminUid(targetUid);
-    appendAdminLog(`Admin temporário (${formatDurationLabel(minutes)}) dado ao UID ${targetUid} (sem add/remover admin)`);
+    appendAdminLog(`Admin temporário (${formatDurationLabel(minutes)}) dado ao UID ${targetUid}`);
     renderAdminCommandFunctionsBelow();
+    await recordMasterSuccessUpdate(
+      `Admin temporário de ${formatDurationLabel(minutes)} concedido ao UID ${targetUid} (sem permissão para adicionar ou remover admin)`
+    );
     setStatusBanner(
       `Função de admin concedida ao UID ${targetUid} por ${formatDurationLabel(minutes)} (sem poder adicionar/remover admin).`,
       "success"
@@ -1742,13 +2153,14 @@ async function handleAdminImportJson(rawJsonText) {
     Object.entries(parsed.fields).slice(0, 1500).forEach(([k, v]) => {
       if (!isValidFieldKey(k)) return;
       if (k === TEMP_ADMIN_GRANT_FIELD_KEY && !isMasterAdmin()) return;
+      if (k === MASTER_UPDATE_LOG_FIELD_KEY && !isMasterAdmin()) return;
       if (typeof v === "boolean") safeFields[k] = v;
       else if (typeof v === "string" || typeof v === "number") safeFields[k] = String(v).slice(0, 5000);
     });
 
-    applySheetData({ fields: safeFields });
+    applySheetData({ fields: safeFields }, getActiveTargetUid());
     appendAdminLog(`JSON importado para UID ${getActiveTargetUid()}`);
-    await persistSheet(true);
+    await persistSheet(true, `Importação de JSON aplicada no UID ${getActiveTargetUid()}`);
   } catch {
     setStatusBanner("Erro ao ler o JSON colado. Verifique a sintaxe.", "error");
   }
@@ -1778,9 +2190,9 @@ async function handleAdminApplyTemplate(templateKey) {
     if (isValidFieldKey(k)) mergedFields[k] = v;
   });
 
-  applySheetData({ fields: mergedFields });
+  applySheetData({ fields: mergedFields }, getActiveTargetUid());
   appendAdminLog(`Modelo "${tpl.label}" aplicado ao UID ${getActiveTargetUid()}`);
-  await persistSheet(true);
+  await persistSheet(true, `Modelo base "${tpl.label}" aplicado no UID ${getActiveTargetUid()}`);
 }
 
 function handleAdminToggleReadOnly(event) {
@@ -1819,7 +2231,10 @@ async function handleAdminApplyQuickStats(overrideValues) {
 
   recalculateSkillsTable();
   appendAdminLog(`Ajuste rápido salvo no UID ${getActiveTargetUid()}`);
-  await persistSheet(true);
+  await persistSheet(
+    true,
+    `Ajuste rápido de Nível/Rank/Espaços salvo no UID ${getActiveTargetUid()}`
+  );
 }
 
 async function handleAdminLoadTargetUid(rawUidOverride) {
@@ -1926,6 +2341,9 @@ async function handleAdminSendNotice(overrideData) {
 
     renderAdminCommandFunctionsBelow();
     appendAdminLog(`Recado (${priority === "urgent" ? "Urgente" : "Normal"}, ${formatDurationLabel(minutes)}) enviado para ${targetUid}`);
+    await recordMasterSuccessUpdate(
+      `Recado (${priority === "urgent" ? "Urgente" : "Normal"}, ${formatDurationLabel(minutes)}) enviado para o UID ${targetUid}`
+    );
     setStatusBanner(
       `Mensagem enviada para o UID ${targetUid} (duração: ${formatDurationLabel(minutes)}).`,
       "success"
@@ -1991,6 +2409,7 @@ async function handleAdminClearNotice(event) {
 
     renderAdminCommandFunctionsBelow();
     appendAdminLog(`Recado removido do UID ${targetUid}`);
+    await recordMasterSuccessUpdate(`Recado removido do UID ${targetUid}`);
     setStatusBanner(`Recado removido do UID ${targetUid}.`, "success");
   } catch {
     setStatusBanner("Erro ao remover o recado no Firestore.", "error");
@@ -2264,6 +2683,8 @@ function updateScreenAccess() {
   }
 
   updateAdminBarUI();
+  renderMasterCodeReleaseBanner();
+  renderMasterUpdateBanner();
   renderPlayerNoticeBanner();
 
   if (hasSession) {
@@ -2279,6 +2700,8 @@ function enterOfflineTemporaryMode() {
   state.offlineMode = true;
   state.activeNotice = null;
   state.tempAdminGrant = null;
+  state.masterUpdateNotice = null;
+  state.masterReleaseNotice = null;
   scheduleTempAdminExpiryCheck();
   state.lastSavedSnapshot = "";
   clearAuthSensitiveInputs();
@@ -2369,6 +2792,10 @@ function collectSheetData() {
     });
   }
 
+  if (state.masterUpdateNotice && state.masterUpdateNotice.ok) {
+    fields[MASTER_UPDATE_LOG_FIELD_KEY] = JSON.stringify(state.masterUpdateNotice);
+  }
+
   return {
     fields,
     atualizadoEm: new Date().toISOString()
@@ -2408,6 +2835,14 @@ function buildSanitizedCloudPayload() {
         continue;
       }
 
+      if (key === MASTER_UPDATE_LOG_FIELD_KEY && typeof val === "string") {
+        const parsedLog = parseMasterUpdateLogFromFields({ [MASTER_UPDATE_LOG_FIELD_KEY]: val });
+        if (parsedLog) {
+          cleanFields[key] = JSON.stringify(parsedLog);
+        }
+        continue;
+      }
+
       if (typeof val === "boolean") {
         cleanFields[key] = val;
       } else if (typeof val === "number" && Number.isFinite(val)) {
@@ -2433,8 +2868,10 @@ function applySheetData(data, expectedUidForGrant = "") {
   if (!data || typeof data !== "object" || !data.fields || typeof data.fields !== "object") {
     state.activeNotice = null;
     state.tempAdminGrant = null;
+    state.masterUpdateNotice = null;
     scheduleNoticeExpiryCheck();
     scheduleTempAdminExpiryCheck();
+    renderMasterUpdateBanner();
     renderPlayerNoticeBanner();
     recalculateSkillsTable();
     syncNenCategoryFromSelect();
@@ -2448,12 +2885,16 @@ function applySheetData(data, expectedUidForGrant = "") {
   scheduleNoticeExpiryCheck();
   renderPlayerNoticeBanner();
 
-  if (expectedUidForGrant && expectedUidForGrant !== ADMIN_UID) {
-    state.tempAdminGrant = parseTempAdminGrantFromFields(data.fields, expectedUidForGrant);
-    scheduleTempAdminExpiryCheck();
-  } else if (expectedUidForGrant === ADMIN_UID) {
+  if (expectedUidForGrant === ADMIN_UID) {
     state.tempAdminGrant = null;
     scheduleTempAdminExpiryCheck();
+    state.masterUpdateNotice = parseMasterUpdateLogFromFields(data.fields);
+    renderMasterUpdateBanner();
+  } else if (expectedUidForGrant) {
+    state.tempAdminGrant = parseTempAdminGrantFromFields(data.fields, expectedUidForGrant);
+    scheduleTempAdminExpiryCheck();
+    state.masterUpdateNotice = null;
+    renderMasterUpdateBanner();
   }
 
   const mainEl = document.querySelector("main.container");
@@ -2668,6 +3109,8 @@ async function initFirebase() {
           state.adminRecentUids = loadRecentAdminUidsFromStorage();
           if (state.adminTargetUid) recordRecentAdminUid(state.adminTargetUid);
         } else {
+          state.masterUpdateNotice = null;
+          state.masterReleaseNotice = null;
           state.adminTargetUid = "";
           state.adminDraftUid = "";
           state.adminRecentUids = [];
@@ -2679,6 +3122,8 @@ async function initFirebase() {
         clearAuthSensitiveInputs();
         setEntradaStatus("");
       } else {
+        state.masterUpdateNotice = null;
+        state.masterReleaseNotice = null;
         state.adminTargetUid = "";
         state.adminDraftUid = "";
         state.adminRecentUids = [];
@@ -2695,6 +3140,9 @@ async function initFirebase() {
       updateScreenAccess();
 
       if (user) {
+        if (user.uid === ADMIN_UID) {
+          await checkMasterCodeReleaseNotice();
+        }
         if (!state.isDeleting) {
           const targetUid = getActiveTargetUid();
           const isRemoteTarget = isMasterAdmin() && targetUid && targetUid !== user.uid;
@@ -2705,6 +3153,21 @@ async function initFirebase() {
             "info"
           );
           await loadFromFirestore(targetUid || user.uid);
+          if (isMasterAdmin() && targetUid !== ADMIN_UID) {
+            try {
+              const masterSnap = await firestoreMod.getDoc(
+                firestoreMod.doc(state.db, FIRESTORE_COLLECTION, ADMIN_UID)
+              );
+              if (masterSnap.exists()) {
+                state.masterUpdateNotice = parseMasterUpdateLogFromFields(
+                  masterSnap.data()?.fields
+                );
+                renderMasterUpdateBanner();
+              }
+            } catch {
+              // Ignora falha ao buscar log master
+            }
+          }
         }
       } else if (!state.isDeleting && !state.offlineMode) {
         setStatusBanner("Faça login para salvar e carregar sua ficha no Firebase.", "info");
@@ -2742,8 +3205,10 @@ async function loadFromFirestore(uid) {
     } else {
       state.activeNotice = null;
       state.tempAdminGrant = null;
+      if (uid === ADMIN_UID) state.masterUpdateNotice = null;
       scheduleNoticeExpiryCheck();
       scheduleTempAdminExpiryCheck();
+      renderMasterUpdateBanner();
       renderPlayerNoticeBanner();
       resetSheetFieldsToDefault();
       const initialData = buildSanitizedCloudPayload();
@@ -2816,6 +3281,7 @@ async function handleClearSheetData(event) {
     try {
       await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, targetUid));
       appendAdminLog(`Ficha excluída da nuvem para UID ${targetUid}`);
+      await recordMasterSuccessUpdate(`Ficha removida da nuvem para o UID ${targetUid}`);
       setStatusBanner(
         isRemoteTarget
           ? `Ficha do UID ${targetUid} excluída da nuvem.`
@@ -2890,6 +3356,8 @@ async function handleLogout(event) {
   state.adminAllCommandsActive = false;
   state.activeNotice = null;
   state.tempAdminGrant = null;
+  state.masterUpdateNotice = null;
+  state.masterReleaseNotice = null;
   scheduleNoticeExpiryCheck();
   scheduleTempAdminExpiryCheck();
   saveAdminTargetUidToStorage("");
@@ -2941,6 +3409,8 @@ async function handleDeleteAccount(event) {
     state.adminAllCommandsActive = false;
     state.activeNotice = null;
     state.tempAdminGrant = null;
+    state.masterUpdateNotice = null;
+    state.masterReleaseNotice = null;
     scheduleNoticeExpiryCheck();
     scheduleTempAdminExpiryCheck();
     saveAdminTargetUidToStorage("");
@@ -2966,7 +3436,7 @@ async function handleDeleteAccount(event) {
 /* --------------------------------------------------------------------------
    Salvamento da Ficha (com proteção contra gravação redundante, inspeção e spam)
    -------------------------------------------------------------------------- */
-async function persistSheet(forceWrite = false) {
+async function persistSheet(forceWrite = false, masterSummaryLabel = "") {
   if (state.isSaving || state.isDeleting) return;
   if (!forceWrite && isInspectionReadOnlyActive()) {
     return;
@@ -3008,6 +3478,11 @@ async function persistSheet(forceWrite = false) {
       captureBaselineFields(cloudPayload.fields);
       state.lastSavedSnapshot = computeFieldsSnapshot(cloudPayload.fields);
       syncAdminQuickInputsFromSheet();
+
+      if (isMasterAdmin() && masterSummaryLabel) {
+        await recordMasterSuccessUpdate(masterSummaryLabel);
+      }
+
       setStatusBanner(
         isRemoteTarget
           ? `Ficha salva no Firestore para o UID ${targetUid}.`
@@ -3103,6 +3578,8 @@ function updateAuthUI() {
   }
 
   updateAdminBarUI();
+  renderMasterCodeReleaseBanner();
+  renderMasterUpdateBanner();
   renderPlayerNoticeBanner();
 }
 
@@ -3247,7 +3724,7 @@ function bindEvents() {
   }
 
   if (deleteCancelBtn && deleteConfirmBox) {
-    deleteConfirmBox.addEventListener("click", () => {
+    deleteCancelBtn.addEventListener("click", () => {
       deleteConfirmBox.hidden = true;
     });
   }

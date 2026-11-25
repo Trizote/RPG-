@@ -1,0 +1,78 @@
+name: Atualizar release-manifest.json
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "index.html"
+      - "style.css"
+      - "script.js"
+      - ".github/workflows/update-manifest.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  generate-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar código do repositório
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Gerar release-manifest.json automaticamente
+        run: |
+          node -e '
+          const fs = require("fs");
+          const { execSync } = require("child_process");
+
+          const shortSha = execSync("git rev-parse --short HEAD").toString().trim();
+          const commitMsg = execSync("git log -1 --pretty=%s").toString().trim();
+          const now = new Date();
+          const pad = (n) => String(n).padStart(2, "0");
+          const stamp = `${now.getUTCFullYear()}.${pad(now.getUTCMonth() + 1)}.${pad(now.getUTCDate())}.${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}`;
+          const version = `${stamp}-${shortSha}`;
+
+          let changedFiles = ["index.html", "style.css", "script.js"];
+          try {
+            const diffOutput = execSync("git diff --name-only HEAD~1 HEAD", { stdio: ["pipe", "pipe", "ignore"] })
+              .toString()
+              .trim()
+              .split("\n")
+              .map((s) => s.trim())
+              .filter((f) => ["index.html", "style.css", "script.js"].includes(f));
+            if (diffOutput.length > 0) {
+              changedFiles = diffOutput;
+            }
+          } catch (_) {
+            // Mantém lista padrão no primeiro commit
+          }
+
+          const manifest = {
+            version,
+            publishedAt: now.toISOString(),
+            filesUpdated: changedFiles,
+            addedFunctions: [
+              `Atualização automática via GitHub (${commitMsg || "novo push"})`
+            ],
+            improvements: [
+              `Build #${shortSha} publicado automaticamente na branch main`
+            ]
+          };
+
+          fs.writeFileSync("release-manifest.json", JSON.stringify(manifest, null, 2) + "\n", "utf8");
+          '
+
+      - name: Enviar release-manifest.json de volta para o GitHub
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add release-manifest.json
+          if git diff --staged --quiet; then
+            echo "Sem alterações no manifesto."
+          else
+            git commit -m "chore: atualiza release-manifest.json automaticamente [skip ci]"
+            git push
+          fi
