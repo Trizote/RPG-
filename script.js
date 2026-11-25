@@ -1,10 +1,13 @@
 /* ==========================================================================
    Ordem de Arkan - Ficha de Agente (script.js)
-   Segurança front-end (XSS, Prototype Pollution, integridade e console guard)
+   Segurança front-end (XSS, Prototype Pollution, validação de faixa/tipo,
+   anti-spam de escrita, higiene de sessão, isTrusted guard e console guard)
    + Firebase Authentication & Cloud Firestore + Sessão Offline/Local temporária
    + Exclusão de ficha e exclusão de conta
    + Sincronização precisa das seções no topo conforme a rolagem
    + Cores dinâmicas conforme a Categoria Principal de Afinidade de Nen
+   + Interatividade do painel de detalhes LGPD no rodapé do criador
+   + Cálculo automático da tabela de Perícias (#tabela-pericias)
    Criador: Lucas Ramalho Gavasso Trizote
    ========================================================================== */
 
@@ -27,6 +30,7 @@ const STORAGE_KEYS = Object.freeze({
 const FORBIDDEN_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 const FIRESTORE_COLLECTION = "fichas_ordem_arkan";
 const FIREBASE_SDK_VERSION = "10.14.1";
+const MIN_CLOUD_SAVE_INTERVAL_MS = 1200;
 
 const TRACKED_SECTIONS = Object.freeze([
   { id: "dados-agente", label: "Dados do Agente" },
@@ -45,6 +49,42 @@ const NEN_CATEGORIES_MAP = Object.freeze({
   especializacao: "especializacao"
 });
 
+const SKILL_GRADE_BONUS = Object.freeze({
+  destreinado: 0,
+  treinado: 5,
+  veterano: 10,
+  expert: 15
+});
+
+const ATTR_LABEL_TO_INPUT_ID = Object.freeze({
+  agilidade: "attr-agi",
+  agi: "attr-agi",
+  forca: "attr-for",
+  "força": "attr-for",
+  for: "attr-for",
+  ca: "attr-ca",
+  aura: "attr-ca",
+  intelecto: "attr-int",
+  int: "attr-int",
+  vigor: "attr-vig",
+  vig: "attr-vig"
+});
+
+const ALLOWED_RANKS = Object.freeze(["E", "D", "C", "B", "A", "S", "SS", "SSS"]);
+
+const NUMERIC_BOUNDS = Object.freeze({
+  "nv-val": { min: 1, max: 99, fallback: "1" },
+  "espacos-max": { min: 0, max: 200, fallback: "5" },
+  "def-total": { min: 0, max: 999, fallback: "11" },
+  "def-esquiva": { min: 0, max: 999, fallback: "11" },
+  "def-deslocamento": { min: 0, max: 999, fallback: "9" },
+  "attr-agi": { min: -20, max: 99, fallback: "1" },
+  "attr-for": { min: -20, max: 99, fallback: "1" },
+  "attr-ca": { min: -20, max: 99, fallback: "1" },
+  "attr-int": { min: -20, max: 99, fallback: "1" },
+  "attr-vig": { min: -20, max: 99, fallback: "1" }
+});
+
 const state = {
   user: null,
   offlineMode: false,
@@ -60,11 +100,13 @@ const state = {
   scrollRafId: null,
   saveTimer: null,
   isSaving: false,
-  isDeleting: false
+  isDeleting: false,
+  lastSavedSnapshot: "",
+  lastCloudWriteAt: 0
 };
 
 /* --------------------------------------------------------------------------
-   Defesa contra Prototype Pollution, XSS e Injeção via Console
+   Defesa contra Prototype Pollution, XSS, Faixa Inválida e Console Guard
    -------------------------------------------------------------------------- */
 function isForbiddenKey(key) {
   return typeof key !== "string" || FORBIDDEN_KEYS.includes(key.toLowerCase());
@@ -79,6 +121,7 @@ function sanitizeText(value, maxLength = 500) {
   return value
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
     .replace(/<\s*\/?\s*script\b[^>]*>/gi, "")
+    .replace(/javascript\s*:/gi, "")
     .slice(0, maxLength);
 }
 
@@ -91,9 +134,68 @@ function isValidFieldKey(key) {
   return /^(id:[a-zA-Z0-9_-]{1,64}|idx:\d{1,5})$/.test(key);
 }
 
+function normalizeNumericValue(id, rawValue) {
+  const trimmed = sanitizeSingleLine(String(rawValue ?? ""), 24);
+  if (trimmed === "") return "";
+
+  const parsed = Number(trimmed.replace(",", "."));
+  if (!Number.isFinite(parsed)) {
+    return Object.prototype.hasOwnProperty.call(NUMERIC_BOUNDS, id)
+      ? NUMERIC_BOUNDS[id].fallback
+      : "0";
+  }
+
+  const intVal = Math.trunc(parsed);
+  if (Object.prototype.hasOwnProperty.call(NUMERIC_BOUNDS, id)) {
+    const { min, max } = NUMERIC_BOUNDS[id];
+    return String(Math.min(max, Math.max(min, intVal)));
+  }
+
+  return String(Math.min(999999, Math.max(-999999, intVal)));
+}
+
+function normalizeRankValue(rawValue) {
+  const clean = sanitizeSingleLine(String(rawValue ?? ""), 6).toUpperCase();
+  if (!clean) return "E";
+  return ALLOWED_RANKS.includes(clean) ? clean : clean.slice(0, 4);
+}
+
+function normalizeControlValue(ctrl, rawValue) {
+  if (!ctrl) return "";
+  if (ctrl.id === "rank-val") {
+    return normalizeRankValue(rawValue);
+  }
+  if (ctrl.type === "number") {
+    return normalizeNumericValue(ctrl.id || "", rawValue);
+  }
+  if (ctrl.tagName === "TEXTAREA") {
+    return sanitizeText(String(rawValue ?? ""), 5000);
+  }
+  return sanitizeSingleLine(String(rawValue ?? ""), 250);
+}
+
 function renderSafeText(element, text, maxLength = 220) {
   if (!element) return;
   element.textContent = sanitizeSingleLine(text, maxLength);
+}
+
+function hardenExternalLinks() {
+  const links = document.querySelectorAll('a[target="_blank"]');
+  links.forEach((link) => {
+    const currentRel = (link.getAttribute("rel") || "").split(/\s+/).filter(Boolean);
+    if (!currentRel.includes("noopener")) currentRel.push("noopener");
+    if (!currentRel.includes("noreferrer")) currentRel.push("noreferrer");
+    link.setAttribute("rel", currentRel.join(" "));
+  });
+}
+
+function clearAuthSensitiveInputs() {
+  const emailEl = document.getElementById("auth-email");
+  const passEl = document.getElementById("auth-password");
+  if (emailEl) emailEl.value = "";
+  if (passEl) passEl.value = "";
+  state.showPassword = false;
+  updatePasswordVisibilityUI();
 }
 
 function initConsoleSecurityGuard() {
@@ -108,6 +210,73 @@ function initConsoleSecurityGuard() {
   } catch {
     // Ignora caso console esteja restrito
   }
+}
+
+/* --------------------------------------------------------------------------
+   Cálculo Automático da Tabela de Perícias (#tabela-pericias)
+   -------------------------------------------------------------------------- */
+function getSkillAttributeBonus(attrText) {
+  const normalized = sanitizeSingleLine(attrText || "", 24)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  const inputId = Object.prototype.hasOwnProperty.call(ATTR_LABEL_TO_INPUT_ID, normalized)
+    ? ATTR_LABEL_TO_INPUT_ID[normalized]
+    : "";
+  if (!inputId) return 0;
+
+  const attrEl = document.getElementById(inputId);
+  if (!attrEl) return 0;
+
+  const val = Number(String(attrEl.value ?? "0").replace(",", "."));
+  return Number.isFinite(val) ? Math.trunc(val) : 0;
+}
+
+function getSkillGradeBonus(selectEl) {
+  if (!selectEl) return 0;
+  const raw = sanitizeSingleLine(
+    selectEl.value || (selectEl.options && selectEl.options[selectEl.selectedIndex]?.textContent) || "",
+    24
+  )
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  return Object.prototype.hasOwnProperty.call(SKILL_GRADE_BONUS, raw)
+    ? SKILL_GRADE_BONUS[raw]
+    : 0;
+}
+
+function recalculateSkillsTable() {
+  const table = document.getElementById("tabela-pericias");
+  if (!table) return;
+
+  const rows = table.querySelectorAll("tbody tr");
+  rows.forEach((row) => {
+    const attrCell = row.querySelector(".attr-tag");
+    const gradeSelect = row.querySelector("select");
+    const numberInputs = Array.from(row.querySelectorAll('input[type="number"]'));
+    if (!numberInputs.length) return;
+
+    const totalInput = row.querySelector("input.total-cell") || numberInputs[numberInputs.length - 1];
+    const bonusInputs = numberInputs.filter((inp) => inp !== totalInput);
+
+    let extrasSum = getSkillGradeBonus(gradeSelect);
+    for (let i = 0; i < bonusInputs.length; i += 1) {
+      const n = Number(String(bonusInputs[i].value ?? "0").replace(",", "."));
+      if (Number.isFinite(n)) {
+        extrasSum += Math.trunc(n);
+      }
+    }
+
+    const attrBonus = getSkillAttributeBonus(attrCell ? attrCell.textContent : "");
+    const total = attrBonus + extrasSum;
+
+    if (totalInput) {
+      totalInput.value = String(total);
+    }
+  });
 }
 
 /* --------------------------------------------------------------------------
@@ -311,6 +480,7 @@ function updateScreenAccess() {
 
   if (hasSession) {
     syncNenCategoryFromSelect();
+    recalculateSkillsTable();
     window.requestAnimationFrame(() => {
       syncActiveSectionOnScroll();
     });
@@ -319,6 +489,8 @@ function updateScreenAccess() {
 
 function enterOfflineTemporaryMode() {
   state.offlineMode = true;
+  state.lastSavedSnapshot = "";
+  clearAuthSensitiveInputs();
   setEntradaStatus("");
   updateAuthUI();
   updateScreenAccess();
@@ -339,7 +511,21 @@ function buildFieldKey(ctrl, index) {
   return `idx:${index}`;
 }
 
+function computeFieldsSnapshot(fieldsObj) {
+  if (!fieldsObj || typeof fieldsObj !== "object") return "";
+  const sortedKeys = Object.keys(fieldsObj).sort();
+  const ordered = createSafeRecord();
+  for (let i = 0; i < sortedKeys.length; i += 1) {
+    const k = sortedKeys[i];
+    if (!isValidFieldKey(k)) continue;
+    ordered[k] = fieldsObj[k];
+  }
+  return JSON.stringify(ordered);
+}
+
 function collectSheetData() {
+  recalculateSkillsTable();
+
   const fields = createSafeRecord();
   const mainEl = document.querySelector("main.container");
   if (!mainEl) {
@@ -354,10 +540,12 @@ function collectSheetData() {
 
     if (ctrl.type === "checkbox") {
       fields[key] = Boolean(ctrl.checked);
-    } else if (ctrl.tagName === "TEXTAREA") {
-      fields[key] = sanitizeText(ctrl.value, 5000);
     } else {
-      fields[key] = sanitizeSingleLine(ctrl.value, 250);
+      const normalized = normalizeControlValue(ctrl, ctrl.value);
+      if (ctrl.value !== normalized && document.activeElement !== ctrl) {
+        ctrl.value = normalized;
+      }
+      fields[key] = normalized;
     }
   });
 
@@ -380,7 +568,7 @@ function buildSanitizedCloudPayload() {
       if (typeof val === "boolean") {
         cleanFields[key] = val;
       } else if (typeof val === "number" && Number.isFinite(val)) {
-        cleanFields[key] = String(val).slice(0, 60);
+        cleanFields[key] = String(Math.trunc(val)).slice(0, 24);
       } else if (typeof val === "string") {
         cleanFields[key] =
           key.startsWith("id:anotacoes") ||
@@ -400,6 +588,7 @@ function buildSanitizedCloudPayload() {
 
 function applySheetData(data) {
   if (!data || typeof data !== "object" || !data.fields || typeof data.fields !== "object") {
+    recalculateSkillsTable();
     syncNenCategoryFromSelect();
     return;
   }
@@ -418,12 +607,12 @@ function applySheetData(data) {
     if (ctrl.type === "checkbox") {
       ctrl.checked = Boolean(savedVal);
     } else if (typeof savedVal === "string" || typeof savedVal === "number") {
-      ctrl.value = ctrl.tagName === "TEXTAREA"
-        ? sanitizeText(String(savedVal), 5000)
-        : sanitizeSingleLine(String(savedVal), 250);
+      ctrl.value = normalizeControlValue(ctrl, String(savedVal));
     }
   });
 
+  recalculateSkillsTable();
+  state.lastSavedSnapshot = computeFieldsSnapshot(collectSheetData().fields);
   syncNenCategoryFromSelect();
 }
 
@@ -465,6 +654,8 @@ function resetSheetFieldsToDefault() {
     }
   });
 
+  recalculateSkillsTable();
+  state.lastSavedSnapshot = "";
   syncNenCategoryFromSelect();
 }
 
@@ -472,7 +663,9 @@ function saveLocalData(data) {
   if (state.offlineMode) return;
   if (!hasCookieConsent()) return;
   try {
-    localStorage.setItem(STORAGE_KEYS.LOCAL_SHEET, JSON.stringify(data));
+    const serialized = JSON.stringify(data);
+    if (serialized.length > 500000) return;
+    localStorage.setItem(STORAGE_KEYS.LOCAL_SHEET, serialized);
   } catch (err) {
     console.warn("Não foi possível salvar localmente:", err);
   }
@@ -514,6 +707,26 @@ function hasValidFirebaseConfig(cfg) {
   );
 }
 
+function mapFirebaseAuthError(err) {
+  const code = err && typeof err.code === "string" ? err.code : "";
+  switch (code) {
+    case "auth/invalid-email":
+      return "Formato de e-mail inválido.";
+    case "auth/user-not-found":
+    case "auth/wrong-password":
+    case "auth/invalid-credential":
+      return "E-mail ou senha incorretos.";
+    case "auth/email-already-in-use":
+      return "Este e-mail já está cadastrado. Alterne para Entrar.";
+    case "auth/weak-password":
+      return "Escolha uma senha mais forte (mínimo de 6 caracteres).";
+    case "auth/too-many-requests":
+      return "Muitas tentativas seguidas. Aguarde alguns instantes e tente novamente.";
+    default:
+      return "Não foi possível autenticar. Confira e-mail, senha e o método E-mail/Senha no Firebase.";
+  }
+}
+
 async function initFirebase() {
   if (!hasValidFirebaseConfig(FIREBASE_CONFIG)) {
     setEntradaStatus("Firebase não configurado. Use a opção Entrar offline/local.");
@@ -538,6 +751,7 @@ async function initFirebase() {
       state.user = user || null;
       if (user) {
         state.offlineMode = false;
+        clearAuthSensitiveInputs();
         setEntradaStatus("");
       }
       updateAuthUI();
@@ -555,8 +769,7 @@ async function initFirebase() {
         setStatusBanner("Faça login para salvar e carregar sua ficha no Firebase.", "info");
       }
     });
-  } catch (err) {
-    console.error("Erro ao iniciar Firebase:", err);
+  } catch {
     setEntradaStatus("Sem conexão com o Firebase no momento. Você pode entrar offline/local.");
   }
 }
@@ -577,11 +790,12 @@ async function loadFromFirestore(uid) {
     } else {
       const initialData = buildSanitizedCloudPayload();
       await setDoc(docRef, initialData);
+      state.lastSavedSnapshot = computeFieldsSnapshot(initialData.fields);
+      state.lastCloudWriteAt = Date.now();
       saveLocalData(initialData);
       setStatusBanner("Nova ficha criada na sua conta do Firebase.", "success");
     }
-  } catch (err) {
-    console.error("Erro ao carregar ficha do Firestore:", err);
+  } catch {
     setStatusBanner("Erro ao ler dados do Firebase. Verifique as regras do Firestore.", "error");
   }
 }
@@ -594,10 +808,12 @@ async function saveToFirestore(uid, data) {
   const docRef = doc(state.db, FIRESTORE_COLLECTION, uid);
   const safeData = data && data.fields ? data : buildSanitizedCloudPayload();
   await setDoc(docRef, safeData, { merge: true });
+  state.lastCloudWriteAt = Date.now();
   return true;
 }
 
-async function handleClearSheetData() {
+async function handleClearSheetData(event) {
+  if (event && event.isTrusted === false) return;
   if (state.isSaving || state.isDeleting) return;
 
   if (state.saveTimer) {
@@ -617,8 +833,7 @@ async function handleClearSheetData() {
       await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, state.user.uid));
       setStatusBanner("Ficha excluída da nuvem e do navegador.", "success");
       return;
-    } catch (err) {
-      console.error("Erro ao excluir ficha no Firestore:", err);
+    } catch {
       setStatusBanner("Ficha limpa na tela, mas houve erro ao apagar na nuvem.", "error");
       return;
     }
@@ -629,6 +844,7 @@ async function handleClearSheetData() {
 
 async function handleAuthSubmit(event) {
   event.preventDefault();
+  if (event && event.isTrusted === false) return;
   if (!state.firebaseReady || !state.auth) {
     setEntradaStatus("Firebase ainda não foi inicializado.");
     return;
@@ -639,7 +855,7 @@ async function handleAuthSubmit(event) {
   const email = sanitizeSingleLine(emailEl ? emailEl.value : "", 160);
   const password = passEl ? passEl.value : "";
 
-  if (!email || password.length < 6) {
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 6) {
     setEntradaStatus("Preencha um e-mail válido e uma senha com pelo menos 6 caracteres.");
     return;
   }
@@ -653,23 +869,23 @@ async function handleAuthSubmit(event) {
     } else {
       await signInWithEmailAndPassword(state.auth, email, password);
     }
-    if (passEl) passEl.value = "";
-    state.showPassword = false;
-    updatePasswordVisibilityUI();
+    clearAuthSensitiveInputs();
   } catch (err) {
-    console.error("Falha na autenticação:", err);
-    setEntradaStatus("Não foi possível autenticar. Confira e-mail, senha e o método E-mail/Senha no Firebase.");
+    setEntradaStatus(mapFirebaseAuthError(err));
   }
 }
 
-async function handleLogout() {
+async function handleLogout(event) {
+  if (event && event.isTrusted === false) return;
   state.offlineMode = false;
+  state.lastSavedSnapshot = "";
+  clearAuthSensitiveInputs();
+
   if (state.firebaseReady && state.auth && state.user) {
     try {
       const { signOut } = state.firebaseModules.authMod;
       await signOut(state.auth);
-    } catch (err) {
-      console.error("Erro ao sair:", err);
+    } catch {
       setStatusBanner("Erro ao encerrar a sessão.", "error");
       return;
     }
@@ -679,7 +895,8 @@ async function handleLogout() {
   setEntradaStatus("Você saiu da sessão. Escolha como deseja entrar novamente.");
 }
 
-async function handleDeleteAccount() {
+async function handleDeleteAccount(event) {
+  if (event && event.isTrusted === false) return;
   if (!state.firebaseReady || !state.auth || !state.auth.currentUser || state.isDeleting) {
     return;
   }
@@ -699,7 +916,9 @@ async function handleDeleteAccount() {
 
     await deleteUser(currentUser);
     clearLocalData();
+    clearAuthSensitiveInputs();
     state.offlineMode = false;
+    state.lastSavedSnapshot = "";
 
     const confirmBox = document.getElementById("auth-delete-confirm-box");
     if (confirmBox) confirmBox.hidden = true;
@@ -708,7 +927,6 @@ async function handleDeleteAccount() {
     updateScreenAccess();
     setEntradaStatus("Conta e ficha excluídas permanentemente do Firebase.");
   } catch (err) {
-    console.error("Erro ao excluir conta:", err);
     if (err && err.code === "auth/requires-recent-login") {
       setStatusBanner("Por segurança, saia e entre novamente antes de excluir a conta.", "warning");
     } else {
@@ -720,14 +938,15 @@ async function handleDeleteAccount() {
 }
 
 /* --------------------------------------------------------------------------
-   Salvamento da Ficha
+   Salvamento da Ficha (com proteção contra gravação redundante e spam)
    -------------------------------------------------------------------------- */
-async function persistSheet() {
+async function persistSheet(forceWrite = false) {
   if (state.isSaving || state.isDeleting) return;
   state.isSaving = true;
 
   try {
     const payload = collectSheetData();
+    const currentSnapshot = computeFieldsSnapshot(payload.fields);
 
     if (state.offlineMode && !state.user) {
       setStatusBanner(
@@ -737,19 +956,30 @@ async function persistSheet() {
       return;
     }
 
+    if (!forceWrite && currentSnapshot === state.lastSavedSnapshot) {
+      return;
+    }
+
     saveLocalData(payload);
 
     if (state.firebaseReady && state.user) {
+      const elapsed = Date.now() - state.lastCloudWriteAt;
+      if (!forceWrite && elapsed < MIN_CLOUD_SAVE_INTERVAL_MS) {
+        scheduleAutoSave();
+        return;
+      }
+
       const cloudPayload = buildSanitizedCloudPayload();
       await saveToFirestore(state.user.uid, cloudPayload);
+      state.lastSavedSnapshot = computeFieldsSnapshot(cloudPayload.fields);
       setStatusBanner("Ficha salva no banco de dados Firebase.", "success");
     } else if (hasCookieConsent()) {
+      state.lastSavedSnapshot = currentSnapshot;
       setStatusBanner("Alterações salvas localmente.", "info");
     } else {
       setStatusBanner("Aceite o banner LGPD para salvar localmente ou faça login no Firebase.", "info");
     }
-  } catch (err) {
-    console.error("Erro ao salvar ficha:", err);
+  } catch {
     setStatusBanner("Erro ao salvar no Firebase. Confira as permissões do Firestore.", "error");
   } finally {
     state.isSaving = false;
@@ -759,8 +989,8 @@ async function persistSheet() {
 function scheduleAutoSave() {
   if (state.saveTimer) clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(() => {
-    persistSheet();
-  }, 700);
+    persistSheet(false);
+  }, 750);
 }
 
 /* --------------------------------------------------------------------------
@@ -839,6 +1069,21 @@ function bindEvents() {
   window.addEventListener("scroll", scheduleScrollSectionSync, { passive: true });
   window.addEventListener("resize", scheduleScrollSectionSync, { passive: true });
 
+  const rodapeDetalhesBtn = document.getElementById("btn-rodape-detalhes");
+  const rodapePainelLgpd = document.getElementById("rodape-painel-lgpd");
+  const rodapeEl = document.getElementById("rodape-criador");
+
+  if (rodapeDetalhesBtn && rodapePainelLgpd) {
+    rodapeDetalhesBtn.addEventListener("click", () => {
+      const seraOcultado = !rodapePainelLgpd.hidden;
+      rodapePainelLgpd.hidden = seraOcultado;
+      rodapeDetalhesBtn.setAttribute("aria-expanded", seraOcultado ? "false" : "true");
+      if (rodapeEl) {
+        rodapeEl.classList.toggle("rodape-destacado", !seraOcultado);
+      }
+    });
+  }
+
   const nenSelect = document.getElementById("categoria-principal-nen");
   if (nenSelect) {
     nenSelect.addEventListener("change", (event) => {
@@ -876,6 +1121,7 @@ function bindEvents() {
   if (irLoginNuvemBtn) {
     irLoginNuvemBtn.addEventListener("click", () => {
       state.offlineMode = false;
+      clearAuthSensitiveInputs();
       updateAuthUI();
       updateScreenAccess();
       setEntradaStatus("Entre com sua conta Firebase para salvar na nuvem.");
@@ -961,18 +1207,19 @@ function bindEvents() {
 
   const saveBtn = document.getElementById("btn-save-sheet");
   if (saveBtn) {
-    saveBtn.addEventListener("click", () => persistSheet());
+    saveBtn.addEventListener("click", () => persistSheet(true));
   }
 
   const syncBtn = document.getElementById("auth-sync-btn");
   if (syncBtn) {
-    syncBtn.addEventListener("click", () => persistSheet());
+    syncBtn.addEventListener("click", () => persistSheet(true));
   }
 
   const mainEl = document.querySelector("main.container");
   if (mainEl) {
     const handleFieldUpdate = (event) => {
       if (event.target && event.target.closest("#login-firebase")) return;
+      recalculateSkillsTable();
       scheduleAutoSave();
     };
     mainEl.addEventListener("input", handleFieldUpdate);
@@ -982,12 +1229,14 @@ function bindEvents() {
 
 document.addEventListener("DOMContentLoaded", () => {
   initConsoleSecurityGuard();
+  hardenExternalLinks();
   initLgpdBanner();
 
   const localData = loadLocalData();
   if (localData) {
     applySheetData(localData);
   } else {
+    recalculateSkillsTable();
     syncNenCategoryFromSelect();
   }
 

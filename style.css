@@ -15,6 +15,7 @@
   --texto-suave: #a8c4cb;
   --sombra-card: 0 12px 28px rgba(2, 10, 15, 0.56);
 
+  /* Variáveis dinâmicas da Afinidade de Nen */
   --nen-primaria: #3ca888;
   --nen-secundaria: #2699bc;
   --nen-borda: rgba(130, 210, 224, 0.28);
@@ -73,7 +74,7 @@ html[data-nen-categoria="manipulacao"] {
   --nen-texto-contraste: #ffffff;
 }
 
-/* Especialização: preto / branco / roxo-escuro */
+/* Especialização: roxo-escuro / branco */
 html[data-nen-categoria="especializacao"] {
   --nen-primaria: #581c87;
   --nen-secundaria: #f8fafc;
@@ -181,6 +182,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Ecrã de Entrada Dedicado + Título Superior em 3D */
 .entrada-screen {
   min-height: 100vh;
   padding: 26px 16px 38px;
@@ -332,6 +334,7 @@ body {
   text-align: center;
 }
 
+/* Cabeçalho e Navegação */
 .topo {
   background: rgba(11, 27, 36, 0.93);
   backdrop-filter: blur(14px);
@@ -423,6 +426,7 @@ body {
   background: linear-gradient(135deg, #17829e 0%, #2699bc 100%);
 }
 
+/* Estrutura Principal */
 .container {
   max-width: 1360px;
   margin: 24px auto;
@@ -446,6 +450,7 @@ body {
   text-shadow: 0 2px 10px rgba(23, 130, 158, 0.35);
 }
 
+/* Cards e Cores da Planilha */
 .card {
   background: linear-gradient(180deg, rgba(18, 42, 54, 0.97) 0%, rgba(12, 28, 37, 0.99) 100%);
   border: 1px solid var(--borda-sutil);
@@ -478,6 +483,7 @@ body {
 .roxo-escuro { background: linear-gradient(135deg, #134a3a 0%, #1d6953 100%); }
 .roxo-vivo { background: linear-gradient(135deg, #1b697d 0%, #124857 100%); }
 
+/* Inputs e Selects */
 input, select, textarea {
   width: 100%;
   background-color: var(--bg-campo);
@@ -500,6 +506,7 @@ input:focus, select:focus, textarea:focus {
   background-color: #0b1c26;
 }
 
+/* Campo de Senha com Botão de Visibilidade */
 .senha-grupo {
   display: flex;
   align-items: stretch;
@@ -533,6 +540,7 @@ input:focus, select:focus, textarea:focus {
   border-color: #8ce0f0;
 }
 
+/* Faixa de Status e Sessão Firebase */
 .status-banner {
   background: linear-gradient(135deg, rgba(16, 40, 52, 0.98) 0%, rgba(11, 27, 36, 0.98) 100%);
   border: 1px solid var(--borda-sutil);
@@ -632,6 +640,7 @@ input:focus, select:focus, textarea:focus {
   background: linear-gradient(135deg, #ba2d45 0%, #96283b 100%);
 }
 
+/* Identificação */
 .grid-identificacao {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -655,6 +664,7 @@ input:focus, select:focus, textarea:focus {
   color: #ffffff;
 }
 
+/* Grid Principal de Status — Masonry fluido sem vãos entre cards em qualquer tela/DPI */
 .grid-principal {
   columns: 270px 4;
   column-gap: 16px;
@@ -700,6 +710,7 @@ input:focus, select:focus, textarea:focus {
   white-space: nowrap;
 }
 
+/* Defesa */
 .defesa-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 64px auto 60px;
@@ -716,6 +727,7 @@ input:focus, select:focus, textarea:focus {
   text-align: center;
 }
 
+/* Atributos & NV */
 .atributos-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -762,6 +774,7 @@ input:focus, select:focus, textarea:focus {
   text-align: center;
 }
 
+/* Afinidade de Nen */
 .texto-nen {
   font-size: 0.85rem;
   color: var(--texto-suave);
@@ -791,6 +804,7 @@ input:focus, select:focus, textarea:focus {
   margin-bottom: 10px;
 }
 
+/* Perícias e Ataques */
 .grid-pericias-ataques {
   display: grid;
   grid-template-columns: 1.4fr 1fr;
@@ -855,6 +869,58 @@ input:focus, select:focus, textarea:focus {
   text-align: center;
 }
 
+/* Ajustes específicos da tabela de Perícias e contraste em Especialização */
+#tabela-pericias th,
+#tabela-pericias td {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+#tabela-pericias select {
+  min-width: 118px;
+  background-color: #0b1c26;
+  color: #ffffff;
+  border: 1px solid rgba(140, 224, 240, 0.24);
+}
+
+#tabela-pericias input[type="number"] {
+  min-width: 64px;
+  text-align: center;
+  background-color: #0b1c26;
+  color: #ffffff;
+  border: 1px solid rgba(140, 224, 240, 0.24);
+}
+
+#tabela-pericias .attr-tag {
+  min-width: 84px;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+#tabela-pericias .total-cell {
+  min-width: 64px;
+  background: linear-gradient(180deg, #f8d886 0%, #e5b749 100%);
+  color: #07131a;
+  font-weight: 800;
+}
+
+html[data-nen-categoria="especializacao"] #tabela-pericias .pericia-nome {
+  background-color: rgba(88, 28, 135, 0.36);
+  color: #ffffff;
+}
+
+html[data-nen-categoria="especializacao"] #tabela-pericias .attr-tag {
+  background-color: #f8fafc;
+  color: #09131a;
+}
+
+html[data-nen-categoria="especializacao"] #tabela-pericias select,
+html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell) {
+  background-color: #081218;
+  color: #ffffff;
+  border-color: rgba(248, 250, 252, 0.35);
+}
+
 .legenda-pericias {
   margin-top: 10px;
   display: flex;
@@ -868,6 +934,7 @@ input:focus, select:focus, textarea:focus {
   border-radius: 8px;
 }
 
+/* Equipamentos e Habilidades */
 .grid-equip-hab {
   display: grid;
   grid-template-columns: 1.2fr 1fr;
@@ -921,6 +988,7 @@ input:focus, select:focus, textarea:focus {
   border: 1px solid rgba(140, 224, 240, 0.08);
 }
 
+/* Histórico & Guilda */
 .grid-historico,
 .grid-historico-inferior,
 .grid-guilda {
@@ -952,25 +1020,122 @@ input:focus, select:focus, textarea:focus {
   flex: 1;
 }
 
+/* Rodapé em Destaque do Criador */
 .rodape {
   max-width: 1360px;
   margin: 0 auto 24px;
-  padding: 15px 18px;
-  background-color: var(--bg-elevado);
-  border: 1px solid var(--borda-sutil);
-  border-top: 2px solid var(--ilha-brilho);
-  border-radius: 11px;
-  font-size: 0.88rem;
+  padding: 18px 20px;
+  background:
+    radial-gradient(circle at 95% 15%, var(--nen-fundo-suave), transparent 48%),
+    linear-gradient(165deg, rgba(16, 39, 51, 0.98) 0%, rgba(9, 22, 30, 0.99) 100%);
+  border: 1px solid var(--nen-borda);
+  border-top: 3px solid var(--nen-primaria);
+  border-radius: 14px;
+  font-size: 0.9rem;
   color: var(--texto-principal);
-  box-shadow: var(--sombra-card);
+  box-shadow: var(--sombra-card), 0 0 24px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
+}
+
+.rodape-topo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.rodape-criador-box {
+  flex: 1 1 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rodape-selo {
+  align-self: flex-start;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  color: var(--nen-texto-contraste);
+  background: linear-gradient(135deg, var(--nen-primaria) 0%, var(--nen-secundaria) 100%);
+  padding: 3px 10px;
+  border-radius: 999px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
+}
+
+.rodape-titulo-linha {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 2px;
+}
+
+.rodape-nome-destaque {
+  font-size: 1.12rem;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  color: #ffffff;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+}
+
+.rodape-projeto-tag {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--nen-destaque);
+  background-color: rgba(8, 21, 28, 0.85);
+  border: 1px solid var(--nen-borda);
+  padding: 2px 9px;
+  border-radius: 7px;
+}
+
+.rodape-bio {
+  font-size: 0.85rem;
+  color: var(--texto-suave);
+  line-height: 1.5;
+  max-width: 820px;
+}
+
+.rodape-btn-detalhes {
+  background: rgba(14, 34, 45, 0.92);
+  color: var(--nen-destaque);
+  border: 1px solid var(--nen-borda);
+  border-radius: 9px;
+  padding: 7px 13px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.rodape-btn-detalhes:hover {
+  transform: translateY(-1px);
+  background: rgba(24, 56, 72, 0.96);
+}
+
+.rodape-painel-lgpd {
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--borda-sutil);
+}
+
+.rodape-painel-lgpd[hidden] {
+  display: none;
 }
 
 .rodape-sub {
-  margin-top: 5px;
+  margin-top: 0;
   font-size: 0.8rem;
   color: var(--texto-suave);
 }
 
+.rodape.rodape-destacado {
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.65), 0 0 0 1px var(--nen-borda);
+}
+
+/* Banner LGPD */
 .lgpd-banner {
   position: fixed;
   left: 12px;

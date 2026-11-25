@@ -3,6 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://www.gstatic.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';"
+  >
   <title>Ordem de Arkan - Ficha de Agente</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -928,13 +932,35 @@
     </main>
 
     <!-- Rodapé com informações do criador -->
-    <footer class="rodape">
-      <p>
-        <strong>Ordem de Arkan - Ficha de Agente</strong> — Criado e desenvolvido por <strong>Lucas Ramalho Gavasso Trizote</strong>.
-      </p>
-      <p class="rodape-sub">
-        Armazenamento conforme LGPD (Lei nº 13.709/2018): sincronização na nuvem via Firebase quando autenticado; modo offline/local não persiste ao recarregar a página.
-      </p>
+    <footer class="rodape" id="rodape-criador" aria-label="Créditos do criador e privacidade">
+      <div class="rodape-topo">
+        <div class="rodape-criador-box">
+          <span class="rodape-selo">Criador &amp; Desenvolvedor</span>
+          <div class="rodape-titulo-linha">
+            <strong class="rodape-nome-destaque">Lucas Ramalho Gavasso Trizote</strong>
+            <span class="rodape-projeto-tag">Ordem de Arkan · Ficha de Agente</span>
+          </div>
+          <p class="rodape-bio">
+            Arquitetura front-end, interface de ficha e integração de dados desenvolvidos com foco em clareza, responsividade e conformidade com a LGPD (Lei nº 13.709/2018).
+          </p>
+        </div>
+
+        <button
+          type="button"
+          id="btn-rodape-detalhes"
+          class="rodape-btn-detalhes"
+          aria-expanded="true"
+          aria-controls="rodape-painel-lgpd"
+        >
+          Detalhes LGPD
+        </button>
+      </div>
+
+      <div id="rodape-painel-lgpd" class="rodape-painel-lgpd">
+        <p class="rodape-sub">
+          Armazenamento conforme LGPD (Lei nº 13.709/2018): sincronização na nuvem via Firebase quando autenticado; modo offline/local não persiste ao recarregar a página.
+        </p>
+      </div>
     </footer>
 
     <!-- Aviso LGPD -->
