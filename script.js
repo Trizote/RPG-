@@ -3,6 +3,7 @@
    Segurança front-end (XSS, Prototype Pollution, validação de faixa/tipo,
    anti-spam de escrita, higiene de sessão, isTrusted guard e console guard)
    + Firebase Authentication & Cloud Firestore + Sessão Offline/Local temporária
+   + Modo Administrador por UID (leitura e gravação de fichas alvo)
    + Exclusão de ficha e exclusão de conta
    + Sincronização precisa das seções no topo conforme a rolagem
    + Cores dinâmicas conforme a Categoria Principal de Afinidade de Nen
@@ -24,8 +25,12 @@ const FIREBASE_CONFIG = Object.freeze({
 
 const STORAGE_KEYS = Object.freeze({
   LOCAL_SHEET: "ordem_de_arkan_agente_v1",
-  COOKIE_CONSENT: "ordem_de_arkan_lgpd_v1"
+  COOKIE_CONSENT: "ordem_de_arkan_lgpd_v1",
+  ADMIN_TARGET_UID: "ordem_de_arkan_admin_target_uid_v1"
 });
+
+const ADMIN_UID = "TcudbnuOMcTySJWhz0JHaNDuNU22";
+const UID_REGEX = /^[a-zA-Z0-9_-]{10,128}$/;
 
 const FORBIDDEN_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 const FIRESTORE_COLLECTION = "fichas_ordem_arkan";
@@ -102,7 +107,8 @@ const state = {
   isSaving: false,
   isDeleting: false,
   lastSavedSnapshot: "",
-  lastCloudWriteAt: 0
+  lastCloudWriteAt: 0,
+  adminTargetUid: ""
 };
 
 /* --------------------------------------------------------------------------
@@ -210,6 +216,213 @@ function initConsoleSecurityGuard() {
   } catch {
     // Ignora caso console esteja restrito
   }
+}
+
+/* --------------------------------------------------------------------------
+   Helpers de Modo Administrador por UID
+   -------------------------------------------------------------------------- */
+function isCurrentUserAdmin() {
+  return Boolean(state.user && typeof state.user.uid === "string" && state.user.uid === ADMIN_UID);
+}
+
+function sanitizeTargetUid(rawUid) {
+  const clean = sanitizeSingleLine(String(rawUid ?? ""), 128);
+  return UID_REGEX.test(clean) ? clean : "";
+}
+
+function saveAdminTargetUidToStorage(uid) {
+  try {
+    if (uid) {
+      sessionStorage.setItem(STORAGE_KEYS.ADMIN_TARGET_UID, uid);
+    } else {
+      sessionStorage.removeItem(STORAGE_KEYS.ADMIN_TARGET_UID);
+    }
+  } catch {
+    // Ignora falha de armazenamento
+  }
+}
+
+function loadAdminTargetUidFromStorage() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEYS.ADMIN_TARGET_UID) || "";
+    return sanitizeTargetUid(raw);
+  } catch {
+    return "";
+  }
+}
+
+function getActiveTargetUid() {
+  if (!state.user || !state.user.uid) return "";
+  if (isCurrentUserAdmin() && state.adminTargetUid) {
+    return state.adminTargetUid;
+  }
+  return state.user.uid;
+}
+
+function updateAdminBarUI() {
+  const bar = document.getElementById("admin-uid-bar");
+  const input = document.getElementById("admin-target-uid-input");
+  const badge = document.getElementById("admin-target-status");
+
+  if (!isCurrentUserAdmin()) {
+    if (bar) bar.hidden = true;
+    return;
+  }
+
+  ensureAdminBarElement();
+  const activeBar = document.getElementById("admin-uid-bar");
+  const activeInput = document.getElementById("admin-target-uid-input");
+  const activeBadge = document.getElementById("admin-target-status");
+
+  if (activeBar) activeBar.hidden = false;
+  if (activeInput && document.activeElement !== activeInput) {
+    activeInput.value = state.adminTargetUid || "";
+  }
+  if (activeBadge) {
+    if (state.adminTargetUid && state.adminTargetUid !== state.user.uid) {
+      activeBadge.textContent = `Editando UID alvo: ${state.adminTargetUid}`;
+    } else {
+      activeBadge.textContent = `Editando própria ficha (${state.user.uid})`;
+    }
+  }
+  void bar;
+  void input;
+  void badge;
+}
+
+function ensureAdminBarElement() {
+  if (document.getElementById("admin-uid-bar")) return;
+  const appFicha = document.getElementById("app-ficha");
+  const mainEl = document.querySelector("main.container");
+  const anchorParent = mainEl && mainEl.parentNode ? mainEl.parentNode : appFicha;
+  if (!anchorParent) return;
+
+  const bar = document.createElement("section");
+  bar.id = "admin-uid-bar";
+  bar.hidden = true;
+  bar.setAttribute("aria-label", "Painel de Administrador por UID");
+  bar.style.cssText = [
+    "margin: 10px auto 12px",
+    "padding: 12px 14px",
+    "max-width: 1120px",
+    "border-radius: 10px",
+    "border: 1px solid rgba(255, 217, 102, 0.45)",
+    "background: rgba(20, 28, 36, 0.94)",
+    "color: #f2f4f8",
+    "display: flex",
+    "flex-wrap: wrap",
+    "gap: 8px",
+    "align-items: center",
+    "justify-content: space-between"
+  ].join(";");
+
+  const title = document.createElement("strong");
+  title.textContent = "Modo Admin (UID)";
+  title.style.cssText = "color: #ffd966; font-size: 13px;";
+
+  const controlsWrap = document.createElement("div");
+  controlsWrap.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; flex: 1 1 280px; align-items: center;";
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.id = "admin-target-uid-input";
+  input.placeholder = "Cole o UID do jogador...";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.setAttribute("aria-label", "UID do usuário alvo");
+  input.style.cssText = [
+    "flex: 1 1 190px",
+    "min-width: 150px",
+    "padding: 8px 10px",
+    "border-radius: 8px",
+    "border: 1px solid rgba(255,255,255,0.22)",
+    "background: rgba(10,14,18,0.85)",
+    "color: #fff",
+    "font-size: 13px"
+  ].join(";");
+
+  const loadBtn = document.createElement("button");
+  loadBtn.type = "button";
+  loadBtn.id = "admin-load-uid-btn";
+  loadBtn.textContent = "Carregar UID";
+  loadBtn.style.cssText = [
+    "padding: 8px 12px",
+    "border-radius: 8px",
+    "border: none",
+    "background: #2b8a6e",
+    "color: #fff",
+    "font-weight: 600",
+    "font-size: 13px",
+    "cursor: pointer"
+  ].join(";");
+
+  const selfBtn = document.createElement("button");
+  selfBtn.type = "button";
+  selfBtn.id = "admin-self-uid-btn";
+  selfBtn.textContent = "Minha ficha";
+  selfBtn.style.cssText = [
+    "padding: 8px 12px",
+    "border-radius: 8px",
+    "border: 1px solid rgba(255,255,255,0.25)",
+    "background: transparent",
+    "color: #e4e4ec",
+    "font-size: 13px",
+    "cursor: pointer"
+  ].join(";");
+
+  const statusSpan = document.createElement("span");
+  statusSpan.id = "admin-target-status";
+  statusSpan.style.cssText = "width: 100%; font-size: 12px; color: #b8c2cc; word-break: break-all;";
+
+  controlsWrap.appendChild(input);
+  controlsWrap.appendChild(loadBtn);
+  controlsWrap.appendChild(selfBtn);
+  bar.appendChild(title);
+  bar.appendChild(controlsWrap);
+  bar.appendChild(statusSpan);
+
+  if (mainEl && mainEl.parentNode === anchorParent) {
+    anchorParent.insertBefore(bar, mainEl);
+  } else {
+    anchorParent.appendChild(bar);
+  }
+
+  loadBtn.addEventListener("click", handleAdminLoadTargetUid);
+  selfBtn.addEventListener("click", handleAdminReturnToOwnSheet);
+}
+
+async function handleAdminLoadTargetUid(event) {
+  if (event && event.isTrusted === false) return;
+  if (!isCurrentUserAdmin()) {
+    setStatusBanner("Apenas o administrador autorizado pode carregar fichas por UID.", "error");
+    return;
+  }
+
+  const input = document.getElementById("admin-target-uid-input");
+  const uid = sanitizeTargetUid(input ? input.value : "");
+  if (!uid) {
+    setStatusBanner("Informe um UID válido para carregar a ficha do jogador.", "warning");
+    return;
+  }
+
+  state.adminTargetUid = uid;
+  saveAdminTargetUidToStorage(uid);
+  state.lastSavedSnapshot = "";
+  updateAdminBarUI();
+  setStatusBanner(`Carregando ficha do UID ${uid}...`, "info");
+  await loadFromFirestore(uid);
+}
+
+async function handleAdminReturnToOwnSheet(event) {
+  if (event && event.isTrusted === false) return;
+  if (!state.user || !state.user.uid) return;
+
+  state.adminTargetUid = "";
+  saveAdminTargetUidToStorage("");
+  state.lastSavedSnapshot = "";
+  updateAdminBarUI();
+  setStatusBanner("Voltando para a sua própria ficha...", "info");
+  await loadFromFirestore(state.user.uid);
 }
 
 /* --------------------------------------------------------------------------
@@ -477,6 +690,8 @@ function updateScreenAccess() {
   if (appFicha) {
     appFicha.hidden = !hasSession;
   }
+
+  updateAdminBarUI();
 
   if (hasSession) {
     syncNenCategoryFromSelect();
@@ -760,7 +975,6 @@ async function checkEnvironmentAndFirestoreBeforeLogin() {
       await getDoc(probeRef);
     } catch (dbErr) {
       const dbCode = dbErr && typeof dbErr.code === "string" ? dbErr.code : "";
-      // Em documento inexistente com regras restritas ao dono, permission-denied ou not-found indicam que o Firestore respondeu
       if (dbCode === "unavailable" || dbCode === "deadline-exceeded" || dbCode === "failed-precondition") {
         throw dbErr;
       }
@@ -792,19 +1006,32 @@ async function initFirebase() {
       state.user = user || null;
       if (user) {
         state.offlineMode = false;
+        if (user.uid === ADMIN_UID) {
+          state.adminTargetUid = loadAdminTargetUidFromStorage();
+        } else {
+          state.adminTargetUid = "";
+          saveAdminTargetUidToStorage("");
+        }
         clearAuthSensitiveInputs();
         setEntradaStatus("");
+      } else {
+        state.adminTargetUid = "";
+        saveAdminTargetUidToStorage("");
       }
       updateAuthUI();
       updateScreenAccess();
 
       if (user) {
         if (!state.isDeleting) {
+          const targetUid = getActiveTargetUid();
+          const isRemoteTarget = user.uid === ADMIN_UID && targetUid && targetUid !== user.uid;
           setStatusBanner(
-            `Conectado como ${sanitizeSingleLine(user.email || "agente", 160)}. Carregando ficha...`,
+            isRemoteTarget
+              ? `Admin conectado. Carregando ficha do UID ${targetUid}...`
+              : `Conectado como ${sanitizeSingleLine(user.email || "agente", 160)}. Carregando ficha...`,
             "info"
           );
-          await loadFromFirestore(user.uid);
+          await loadFromFirestore(targetUid || user.uid);
         }
       } else if (!state.isDeleting && !state.offlineMode) {
         setStatusBanner("Faça login para salvar e carregar sua ficha no Firebase.", "info");
@@ -828,18 +1055,38 @@ async function loadFromFirestore(uid) {
     if (snap.exists()) {
       const cloudData = snap.data();
       applySheetData(cloudData);
-      saveLocalData(cloudData);
-      setStatusBanner("Ficha carregada do banco de dados Firebase.", "success");
+      if (!isCurrentUserAdmin() || uid === state.user?.uid) {
+        saveLocalData(cloudData);
+      }
+      setStatusBanner(
+        isCurrentUserAdmin() && uid !== state.user?.uid
+          ? `Ficha carregada do UID alvo (${uid}).`
+          : "Ficha carregada do banco de dados Firebase.",
+        "success"
+      );
     } else {
+      resetSheetFieldsToDefault();
       const initialData = buildSanitizedCloudPayload();
       await setDoc(docRef, initialData);
       state.lastSavedSnapshot = computeFieldsSnapshot(initialData.fields);
       state.lastCloudWriteAt = Date.now();
-      saveLocalData(initialData);
-      setStatusBanner("Nova ficha criada na sua conta do Firebase.", "success");
+      if (!isCurrentUserAdmin() || uid === state.user?.uid) {
+        saveLocalData(initialData);
+      }
+      setStatusBanner(
+        isCurrentUserAdmin() && uid !== state.user?.uid
+          ? `Nova ficha criada para o UID alvo (${uid}).`
+          : "Nova ficha criada na sua conta do Firebase.",
+        "success"
+      );
     }
-  } catch {
-    setStatusBanner("Erro ao ler dados do Firebase. Verifique as regras do Firestore.", "error");
+  } catch (err) {
+    const code = err && typeof err.code === "string" ? err.code : "";
+    if (code === "permission-denied") {
+      setStatusBanner("Permissão negada no Firestore ao ler este UID.", "error");
+    } else {
+      setStatusBanner("Erro ao ler dados do Firebase. Verifique as regras do Firestore.", "error");
+    }
   }
 }
 
@@ -864,17 +1111,27 @@ async function handleClearSheetData(event) {
     state.saveTimer = null;
   }
 
+  const targetUid = getActiveTargetUid();
+  const isRemoteTarget = Boolean(isCurrentUserAdmin() && targetUid && targetUid !== state.user?.uid);
+
   resetSheetFieldsToDefault();
-  clearLocalData();
+  if (!isRemoteTarget) {
+    clearLocalData();
+  }
 
   const clearConfirmBox = document.getElementById("sheet-clear-confirm-box");
   if (clearConfirmBox) clearConfirmBox.hidden = true;
 
-  if (state.firebaseReady && state.db && state.user && state.user.uid) {
+  if (state.firebaseReady && state.db && targetUid) {
     const { doc, deleteDoc } = state.firebaseModules.firestoreMod;
     try {
-      await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, state.user.uid));
-      setStatusBanner("Ficha excluída da nuvem e do navegador.", "success");
+      await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, targetUid));
+      setStatusBanner(
+        isRemoteTarget
+          ? `Ficha do UID ${targetUid} excluída da nuvem.`
+          : "Ficha excluída da nuvem e do navegador.",
+        "success"
+      );
       return;
     } catch {
       setStatusBanner("Ficha limpa na tela, mas houve erro ao apagar na nuvem.", "error");
@@ -935,6 +1192,8 @@ async function handleAuthSubmit(event) {
 async function handleLogout(event) {
   if (event && event.isTrusted === false) return;
   state.offlineMode = false;
+  state.adminTargetUid = "";
+  saveAdminTargetUidToStorage("");
   state.lastSavedSnapshot = "";
   clearAuthSensitiveInputs();
 
@@ -975,6 +1234,8 @@ async function handleDeleteAccount(event) {
     clearLocalData();
     clearAuthSensitiveInputs();
     state.offlineMode = false;
+    state.adminTargetUid = "";
+    saveAdminTargetUidToStorage("");
     state.lastSavedSnapshot = "";
 
     const confirmBox = document.getElementById("auth-delete-confirm-box");
@@ -1017,9 +1278,14 @@ async function persistSheet(forceWrite = false) {
       return;
     }
 
-    saveLocalData(payload);
+    const targetUid = getActiveTargetUid();
+    const isRemoteTarget = Boolean(isCurrentUserAdmin() && targetUid && targetUid !== state.user?.uid);
 
-    if (state.firebaseReady && state.user) {
+    if (!isRemoteTarget) {
+      saveLocalData(payload);
+    }
+
+    if (state.firebaseReady && state.user && targetUid) {
       const elapsed = Date.now() - state.lastCloudWriteAt;
       if (!forceWrite && elapsed < MIN_CLOUD_SAVE_INTERVAL_MS) {
         scheduleAutoSave();
@@ -1027,17 +1293,27 @@ async function persistSheet(forceWrite = false) {
       }
 
       const cloudPayload = buildSanitizedCloudPayload();
-      await saveToFirestore(state.user.uid, cloudPayload);
+      await saveToFirestore(targetUid, cloudPayload);
       state.lastSavedSnapshot = computeFieldsSnapshot(cloudPayload.fields);
-      setStatusBanner("Ficha salva no banco de dados Firebase.", "success");
+      setStatusBanner(
+        isRemoteTarget
+          ? `Ficha salva no Firestore para o UID ${targetUid}.`
+          : "Ficha salva no banco de dados Firebase.",
+        "success"
+      );
     } else if (hasCookieConsent()) {
       state.lastSavedSnapshot = currentSnapshot;
       setStatusBanner("Alterações salvas localmente.", "info");
     } else {
       setStatusBanner("Aceite o banner LGPD para salvar localmente ou faça login no Firebase.", "info");
     }
-  } catch {
-    setStatusBanner("Erro ao salvar no Firebase. Confira as permissões do Firestore.", "error");
+  } catch (err) {
+    const code = err && typeof err.code === "string" ? err.code : "";
+    if (code === "permission-denied") {
+      setStatusBanner("Permissão negada no Firestore ao salvar a ficha.", "error");
+    } else {
+      setStatusBanner("Erro ao salvar no Firebase. Confira as permissões do Firestore.", "error");
+    }
   } finally {
     state.isSaving = false;
   }
@@ -1110,6 +1386,8 @@ function updateAuthUI() {
     if (offlineBox) offlineBox.hidden = true;
     updatePasswordVisibilityUI();
   }
+
+  updateAdminBarUI();
 }
 
 function initLgpdBanner() {
