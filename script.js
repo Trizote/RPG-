@@ -3,9 +3,10 @@
    Segurança front-end (XSS, Prototype Pollution, validação de faixa/tipo,
    anti-spam de escrita, higiene de sessão, isTrusted guard e console guard)
    + Firebase Authentication & Cloud Firestore + Sessão Offline/Local temporária
-   + Modo Administrador por UID + Chat de Comandos + Prompt Completo de Admin
-   + Mensagem temporária (Normal/Urgente até 24h), Somente Leitura, UIDs Recentes,
-     Ajuste Rápido, Exportar/Importar JSON, Diff de Alterações, Modelos Base e Log
+   + Modo Administrador por UID (exclusivo): Prompt de Comando, Funções
+     Dinâmicas do Comando Abaixo, Todos os Comandos Ativos, Mensagem até 24h
+     (Normal/Urgente), Somente Leitura, UIDs Recentes, Ajuste Rápido,
+     Modelos Base, Diff, Backup JSON e Log da Sessão
    + Exclusão de ficha e exclusão de conta
    + Sincronização precisa das seções no topo conforme a rolagem
    + Cores dinâmicas conforme a Categoria Principal de Afinidade de Nen
@@ -39,6 +40,21 @@ const MAX_NOTICE_HOURS = 24;
 const MAX_NOTICE_MINUTES = MAX_NOTICE_HOURS * 60;
 const MAX_RECENT_UIDS = 6;
 const MAX_ADMIN_LOGS = 25;
+
+const ADMIN_COMMAND_CATALOG = Object.freeze([
+  { cmd: "/uid", syntax: "/uid <UID>", desc: "Carregar ou trocar UID alvo" },
+  { cmd: "/minha", syntax: "/minha", desc: "Voltar para a própria ficha" },
+  { cmd: "/recado", syntax: "/recado <min> <texto>", desc: "Enviar recado normal (até 24h)" },
+  { cmd: "/urgente", syntax: "/urgente <min> <texto>", desc: "Enviar recado urgente (até 24h)" },
+  { cmd: "/remover", syntax: "/remover", desc: "Remover recado ativo do UID" },
+  { cmd: "/ler", syntax: "/ler [on|off]", desc: "Alternar modo somente leitura" },
+  { cmd: "/stats", syntax: "/stats", desc: "Ajustar Nível, Rank e Espaços" },
+  { cmd: "/modelo", syntax: "/modelo [iniciante|veterano|elite]", desc: "Clonar modelo base na ficha" },
+  { cmd: "/diff", syntax: "/diff", desc: "Ver alterações pendentes" },
+  { cmd: "/json", syntax: "/json", desc: "Exportar ou importar JSON" },
+  { cmd: "/log", syntax: "/log", desc: "Ver log da sessão do admin" },
+  { cmd: "/ajuda", syntax: "/ajuda", desc: "Listar todos os comandos" }
+]);
 
 const NOTICE_DURATION_PRESETS = Object.freeze([
   { minutes: 15, label: "15 minutos" },
@@ -181,8 +197,18 @@ const state = {
   adminRecentUids: [],
   adminReadOnly: false,
   adminLogs: [],
-  adminChatHistory: [],
-  adminModalOpen: false,
+  adminActiveCommand: "",
+  adminAllCommandsActive: false,
+  adminDraftUid: "",
+  adminDraftNoticeText: "",
+  adminDraftNoticeMinutes: MAX_NOTICE_MINUTES,
+  adminDraftNoticePriority: "normal",
+  adminDraftNv: "1",
+  adminDraftRank: "E",
+  adminDraftSlots: "5",
+  adminDraftTemplate: "iniciante",
+  adminDraftJson: "",
+  adminDiffText: "",
   activeNotice: null,
   noticeExpiryTimer: null
 };
@@ -399,7 +425,7 @@ function scheduleNoticeExpiryCheck() {
   if (remainingMs <= 0) {
     state.activeNotice = null;
     renderPlayerNoticeBanner();
-    updateAdminNoticePreviewUI();
+    renderAdminCommandFunctionsBelow();
     return;
   }
 
@@ -408,7 +434,7 @@ function scheduleNoticeExpiryCheck() {
     if (state.activeNotice && Date.now() >= state.activeNotice.expiresAt) {
       state.activeNotice = null;
       renderPlayerNoticeBanner();
-      updateAdminNoticePreviewUI();
+      renderAdminCommandFunctionsBelow();
     }
   }, Math.min(remainingMs + 250, 2147483647));
 }
@@ -503,7 +529,8 @@ function ensurePlayerNoticeBannerElement() {
 }
 
 /* --------------------------------------------------------------------------
-   Helpers de Modo Administrador, Log, Diff, JSON, Templates, Chat e Modal
+   Helpers Exclusivos da Conta Admin: Prompt, Funções Abaixo do Comando e
+   Área de Todos os Comandos Ativos
    -------------------------------------------------------------------------- */
 function isCurrentUserAdmin() {
   return Boolean(state.user && typeof state.user.uid === "string" && state.user.uid === ADMIN_UID);
@@ -528,66 +555,9 @@ function appendAdminLog(actionText) {
     second: "2-digit"
   });
   state.adminLogs = [`[${timeStr}] ${clean}`, ...state.adminLogs].slice(0, MAX_ADMIN_LOGS);
-  renderAdminLogsUI();
-}
-
-function appendAdminChatMessage(sender, text) {
-  const cleanSender = sender === "admin" ? "Você" : "Sistema";
-  const cleanText = sanitizeText(String(text ?? ""), 600).trim();
-  if (!cleanText) return;
-  state.adminChatHistory = [...state.adminChatHistory, { sender: cleanSender, text: cleanText }].slice(-20);
-  renderAdminChatHistoryUI();
-}
-
-function renderAdminChatHistoryUI() {
-  const logBox = document.getElementById("admin-chat-history");
-  if (!logBox) return;
-
-  logBox.innerHTML = "";
-  if (!state.adminChatHistory.length) {
-    const empty = document.createElement("div");
-    empty.textContent = "Digite /admin ou /painel para abrir o prompt completo, ou /ajuda para ver comandos.";
-    empty.style.cssText = "font-size: 12px; color: #9fb0c0;";
-    logBox.appendChild(empty);
-    return;
+  if (state.adminActiveCommand === "/log") {
+    renderAdminCommandFunctionsBelow();
   }
-
-  state.adminChatHistory.forEach((entry) => {
-    const line = document.createElement("div");
-    line.style.cssText = "font-size: 12px; line-height: 1.4; white-space: pre-wrap; word-break: break-word;";
-    const prefix = document.createElement("strong");
-    prefix.textContent = `${entry.sender}: `;
-    prefix.style.color = entry.sender === "Você" ? "#7ee2b8" : "#ffd966";
-    const msg = document.createElement("span");
-    msg.textContent = entry.text;
-    msg.style.color = "#e6edf3";
-    line.appendChild(prefix);
-    line.appendChild(msg);
-    logBox.appendChild(line);
-  });
-
-  logBox.scrollTop = logBox.scrollHeight;
-}
-
-function renderAdminLogsUI() {
-  const listEl = document.getElementById("admin-session-log-list");
-  if (!listEl) return;
-
-  listEl.innerHTML = "";
-  if (!state.adminLogs.length) {
-    const empty = document.createElement("li");
-    empty.textContent = "Nenhuma ação registrada nesta sessão.";
-    empty.style.color = "#9fb0c0";
-    listEl.appendChild(empty);
-    return;
-  }
-
-  state.adminLogs.forEach((item) => {
-    const li = document.createElement("li");
-    li.textContent = item;
-    li.style.marginBottom = "4px";
-    listEl.appendChild(li);
-  });
 }
 
 function captureBaselineFields(fieldsObj) {
@@ -654,7 +624,9 @@ function recordRecentAdminUid(uid) {
   } catch {
     // Ignora falha de armazenamento
   }
-  updateAdminRecentUidsUI();
+  if (state.adminActiveCommand === "/uid" || state.adminActiveCommand === "/minha") {
+    renderAdminCommandFunctionsBelow();
+  }
 }
 
 function loadRecentAdminUidsFromStorage() {
@@ -695,102 +667,474 @@ function applySheetReadOnlyState() {
 }
 
 function syncAdminQuickInputsFromSheet() {
-  const nvInput = document.getElementById("admin-quick-nv");
-  const rankSelect = document.getElementById("admin-quick-rank");
-  const slotsInput = document.getElementById("admin-quick-slots");
-
   const sheetNv = document.getElementById("nv-val");
   const sheetRank = document.getElementById("rank-val");
   const sheetSlots = document.getElementById("espacos-max");
 
-  if (nvInput && sheetNv && document.activeElement !== nvInput) {
-    nvInput.value = normalizeNumericValue("nv-val", sheetNv.value || "1");
+  if (sheetNv && document.activeElement?.id !== "admin-fn-nv") {
+    state.adminDraftNv = normalizeNumericValue("nv-val", sheetNv.value || "1");
   }
-  if (rankSelect && sheetRank && document.activeElement !== rankSelect) {
+  if (sheetRank && document.activeElement?.id !== "admin-fn-rank") {
     const cleanRank = normalizeRankValue(sheetRank.value || "E");
-    rankSelect.value = ALLOWED_RANKS.includes(cleanRank) ? cleanRank : "E";
+    state.adminDraftRank = ALLOWED_RANKS.includes(cleanRank) ? cleanRank : "E";
   }
-  if (slotsInput && sheetSlots && document.activeElement !== slotsInput) {
-    slotsInput.value = normalizeNumericValue("espacos-max", sheetSlots.value || "5");
+  if (sheetSlots && document.activeElement?.id !== "admin-fn-slots") {
+    state.adminDraftSlots = normalizeNumericValue("espacos-max", sheetSlots.value || "5");
   }
 }
 
-function updateAdminNoticePreviewUI() {
-  const previewEl = document.getElementById("admin-notice-preview");
-  if (!previewEl) return;
+function resolveCommandNameFromInput(rawInput) {
+  const clean = sanitizeSingleLine(String(rawInput ?? ""), 120).trim();
+  if (!clean) return "";
+  const firstToken = clean.split(/\s+/)[0].toLowerCase();
+  const normalizedToken = firstToken.startsWith("/") ? firstToken : `/${firstToken}`;
 
-  if (!state.activeNotice || Date.now() >= (state.activeNotice.expiresAt || 0)) {
-    previewEl.textContent = "Recado ativo no alvo: nenhum recado ativo no momento.";
-    return;
+  if (normalizedToken === "/ajuste" || normalizedToken === "/nv" || normalizedToken === "/rank") {
+    return "/stats";
+  }
+  if (normalizedToken === "/exportar" || normalizedToken === "/importar") {
+    return "/json";
+  }
+  if (normalizedToken === "/help") {
+    return "/ajuda";
   }
 
-  const tag = state.activeNotice.priority === "urgent" ? "[URGENTE]" : "[Normal]";
-  previewEl.textContent = `Recado ativo no alvo ${tag} (${formatRemainingTimeLabel(state.activeNotice.expiresAt)}): "${state.activeNotice.msg}"`;
+  const found = ADMIN_COMMAND_CATALOG.find((item) => item.cmd === normalizedToken);
+  return found ? found.cmd : normalizedToken;
 }
 
-function updateAdminRecentUidsUI() {
-  const container = document.getElementById("admin-recent-uids-box");
-  if (!container) return;
+function renderActiveCommandsStrip() {
+  const strip = document.getElementById("admin-all-commands-box");
+  const toggleBtn = document.getElementById("admin-toggle-all-cmds-btn");
+  if (!strip || !toggleBtn) return;
 
-  container.innerHTML = "";
-  if (!state.adminRecentUids.length) {
-    container.hidden = true;
+  toggleBtn.textContent = state.adminAllCommandsActive
+    ? "Todos os comandos: ATIVOS (ON)"
+    : "Ativar todos os comandos";
+  toggleBtn.style.background = state.adminAllCommandsActive
+    ? "rgba(255, 217, 102, 0.22)"
+    : "transparent";
+  toggleBtn.style.color = state.adminAllCommandsActive ? "#ffd966" : "#e4e4ec";
+  toggleBtn.style.borderColor = state.adminAllCommandsActive
+    ? "#ffd966"
+    : "rgba(255,255,255,0.25)";
+
+  if (!state.adminAllCommandsActive) {
+    strip.hidden = true;
+    strip.innerHTML = "";
     return;
   }
 
-  container.hidden = false;
-  const label = document.createElement("span");
-  label.textContent = "UIDs recentes:";
-  label.style.cssText = "font-size: 12px; color: #b8c2cc; margin-right: 4px;";
-  container.appendChild(label);
+  strip.hidden = false;
+  strip.innerHTML = "";
 
-  state.adminRecentUids.forEach((uid) => {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.textContent = uid.length > 14 ? `${uid.slice(0, 10)}…` : uid;
-    chip.title = uid;
-    const isSelected = state.adminTargetUid === uid;
-    chip.style.cssText = [
-      "padding: 4px 8px",
-      "border-radius: 6px",
+  const header = document.createElement("div");
+  header.textContent = "Comandos ativos (clique para carregar no prompt e exibir as funções abaixo):";
+  header.style.cssText = "font-size: 12px; color: #ffd966; font-weight: 600; margin-bottom: 6px;";
+  strip.appendChild(header);
+
+  const grid = document.createElement("div");
+  grid.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px;";
+
+  ADMIN_COMMAND_CATALOG.forEach((item) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    const isSelected = state.adminActiveCommand === item.cmd;
+    btn.textContent = `${item.cmd} — ${item.desc}`;
+    btn.style.cssText = [
+      "padding: 5px 9px",
+      "border-radius: 7px",
       "font-size: 11px",
       "cursor: pointer",
       isSelected
-        ? "border: 1px solid #ffd966; background: rgba(255,217,102,0.18); color: #ffd966; font-weight: 700;"
-        : "border: 1px solid rgba(255,255,255,0.2); background: rgba(10,14,18,0.7); color: #e4e4ec;"
+        ? "border: 1px solid #ffd966; background: rgba(255,217,102,0.2); color: #ffd966; font-weight: 700;"
+        : "border: 1px solid rgba(255,255,255,0.18); background: rgba(10,14,18,0.8); color: #e4e4ec;"
     ].join(";");
-    chip.addEventListener("click", async () => {
-      const input = document.getElementById("admin-target-uid-input");
-      if (input) input.value = uid;
-      state.adminTargetUid = uid;
-      saveAdminTargetUidToStorage(uid);
-      recordRecentAdminUid(uid);
-      state.lastSavedSnapshot = "";
-      updateAdminBarUI();
-      setStatusBanner(`Carregando ficha do UID ${uid}...`, "info");
-      await loadFromFirestore(uid);
+
+    btn.addEventListener("click", () => {
+      const promptInput = document.getElementById("admin-prompt-input");
+      if (promptInput) {
+        promptInput.value = `${item.cmd} `;
+        promptInput.focus();
+      }
+      state.adminActiveCommand = item.cmd;
+      renderActiveCommandsStrip();
+      renderAdminCommandFunctionsBelow();
     });
-    container.appendChild(chip);
+
+    grid.appendChild(btn);
   });
+
+  strip.appendChild(grid);
 }
 
-function setAdminModalVisibility(shouldOpen) {
-  if (!isCurrentUserAdmin()) {
-    state.adminModalOpen = false;
-    const modal = document.getElementById("admin-prompt-modal");
-    if (modal) modal.hidden = true;
+function renderAdminCommandFunctionsBelow() {
+  const box = document.getElementById("admin-command-functions-panel");
+  if (!box) return;
+
+  const cmd = state.adminActiveCommand;
+  if (!cmd) {
+    box.hidden = true;
+    box.innerHTML = "";
     return;
   }
-  ensureAdminPromptModalElement();
-  state.adminModalOpen = Boolean(shouldOpen);
-  const modal = document.getElementById("admin-prompt-modal");
-  if (modal) {
-    modal.hidden = !state.adminModalOpen;
-    if (state.adminModalOpen) {
-      updateAdminBarUI();
-      renderAdminLogsUI();
+
+  box.hidden = false;
+  box.innerHTML = "";
+
+  const titleRow = document.createElement("div");
+  titleRow.style.cssText = "display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;";
+
+  const title = document.createElement("strong");
+  const spec = ADMIN_COMMAND_CATALOG.find((c) => c.cmd === cmd);
+  title.textContent = spec
+    ? `Funções do comando ${spec.syntax} — ${spec.desc}`
+    : `Funções do comando ${cmd}`;
+  title.style.cssText = "color: #ffd966; font-size: 12px;";
+
+  const hideBtn = document.createElement("button");
+  hideBtn.type = "button";
+  hideBtn.textContent = "Ocultar";
+  hideBtn.style.cssText = "padding: 3px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: transparent; color: #ccc; font-size: 11px; cursor: pointer;";
+  hideBtn.addEventListener("click", () => {
+    state.adminActiveCommand = "";
+    renderActiveCommandsStrip();
+    renderAdminCommandFunctionsBelow();
+  });
+
+  titleRow.appendChild(title);
+  titleRow.appendChild(hideBtn);
+  box.appendChild(titleRow);
+
+  if (cmd === "/uid" || cmd === "/minha") {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+    const uidInput = document.createElement("input");
+    uidInput.type = "text";
+    uidInput.value = state.adminDraftUid || state.adminTargetUid || "";
+    uidInput.placeholder = "Cole o UID do jogador...";
+    uidInput.style.cssText = "flex: 1 1 200px; padding: 7px 10px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    uidInput.addEventListener("input", () => {
+      state.adminDraftUid = uidInput.value;
+    });
+
+    const loadBtn = document.createElement("button");
+    loadBtn.type = "button";
+    loadBtn.textContent = "Carregar UID";
+    loadBtn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: none; background: #2b8a6e; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+    loadBtn.addEventListener("click", () => handleAdminLoadTargetUid(uidInput.value));
+
+    const selfBtn = document.createElement("button");
+    selfBtn.type = "button";
+    selfBtn.textContent = "Minha ficha";
+    selfBtn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #e4e4ec; font-size: 12px; cursor: pointer;";
+    selfBtn.addEventListener("click", handleAdminReturnToOwnSheet);
+
+    row.appendChild(uidInput);
+    row.appendChild(loadBtn);
+    row.appendChild(selfBtn);
+    box.appendChild(row);
+
+    if (state.adminRecentUids.length) {
+      const recentRow = document.createElement("div");
+      recentRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center;";
+      const lbl = document.createElement("span");
+      lbl.textContent = "Recentes:";
+      lbl.style.cssText = "font-size: 11px; color: #b8c2cc;";
+      recentRow.appendChild(lbl);
+
+      state.adminRecentUids.forEach((u) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.textContent = u.length > 14 ? `${u.slice(0, 10)}…` : u;
+        chip.style.cssText = "padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: #0a0e12; color: #ffd966; font-size: 11px; cursor: pointer;";
+        chip.addEventListener("click", () => {
+          state.adminDraftUid = u;
+          handleAdminLoadTargetUid(u);
+        });
+        recentRow.appendChild(chip);
+      });
+      box.appendChild(recentRow);
     }
+    return;
   }
+
+  if (cmd === "/recado" || cmd === "/urgente" || cmd === "/remover") {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+    const msgInput = document.createElement("input");
+    msgInput.type = "text";
+    msgInput.maxLength = 600;
+    msgInput.value = state.adminDraftNoticeText || "";
+    msgInput.placeholder = "Escreva a mensagem para o UID alvo...";
+    msgInput.style.cssText = "flex: 1 1 200px; padding: 7px 10px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    msgInput.addEventListener("input", () => {
+      state.adminDraftNoticeText = msgInput.value;
+    });
+
+    const prioSelect = document.createElement("select");
+    prioSelect.style.cssText = "padding: 7px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    [
+      { value: "normal", label: "Normal" },
+      { value: "urgent", label: "URGENTE" }
+    ].forEach((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.value;
+      opt.textContent = p.label;
+      if ((cmd === "/urgente" ? "urgent" : state.adminDraftNoticePriority) === p.value) {
+        opt.selected = true;
+      }
+      prioSelect.appendChild(opt);
+    });
+    prioSelect.addEventListener("change", () => {
+      state.adminDraftNoticePriority = prioSelect.value;
+    });
+
+    const durSelect = document.createElement("select");
+    durSelect.style.cssText = "padding: 7px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #ffd966; font-size: 12px; font-weight: 600;";
+    NOTICE_DURATION_PRESETS.forEach((opt) => {
+      const optionEl = document.createElement("option");
+      optionEl.value = String(opt.minutes);
+      optionEl.textContent = opt.label;
+      if (Number(state.adminDraftNoticeMinutes) === opt.minutes) optionEl.selected = true;
+      durSelect.appendChild(optionEl);
+    });
+    durSelect.addEventListener("change", () => {
+      state.adminDraftNoticeMinutes = normalizeNoticeMinutes(durSelect.value);
+    });
+
+    const sendBtn = document.createElement("button");
+    sendBtn.type = "button";
+    sendBtn.textContent = "Enviar recado";
+    sendBtn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: none; background: #c48b1b; color: #111; font-weight: 700; font-size: 12px; cursor: pointer;";
+    sendBtn.addEventListener("click", () =>
+      handleAdminSendNotice({
+        text: msgInput.value,
+        minutes: durSelect.value,
+        priority: prioSelect.value
+      })
+    );
+
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.textContent = "Remover recado";
+    clearBtn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #e4e4ec; font-size: 12px; cursor: pointer;";
+    clearBtn.addEventListener("click", handleAdminClearNotice);
+
+    row.appendChild(msgInput);
+    row.appendChild(prioSelect);
+    row.appendChild(durSelect);
+    row.appendChild(sendBtn);
+    row.appendChild(clearBtn);
+    box.appendChild(row);
+
+    const preview = document.createElement("div");
+    preview.style.cssText = "margin-top: 8px; font-size: 12px; color: #ffe082;";
+    if (!state.activeNotice || Date.now() >= (state.activeNotice.expiresAt || 0)) {
+      preview.textContent = "Recado ativo no alvo: nenhum recado ativo no momento.";
+    } else {
+      const tag = state.activeNotice.priority === "urgent" ? "[URGENTE]" : "[Normal]";
+      preview.textContent = `Recado ativo no alvo ${tag} (${formatRemainingTimeLabel(state.activeNotice.expiresAt)}): "${state.activeNotice.msg}"`;
+    }
+    box.appendChild(preview);
+    return;
+  }
+
+  if (cmd === "/ler") {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.textContent = state.adminReadOnly
+      ? "Somente leitura: ON (clique para liberar edição)"
+      : "Somente leitura: OFF (clique para bloquear edição)";
+    toggleBtn.style.cssText = "padding: 7px 12px; border-radius: 7px; border: 1px solid #ffd966; background: rgba(255,217,102,0.16); color: #ffd966; font-weight: 600; font-size: 12px; cursor: pointer;";
+    toggleBtn.addEventListener("click", handleAdminToggleReadOnly);
+    row.appendChild(toggleBtn);
+    box.appendChild(row);
+    return;
+  }
+
+  if (cmd === "/stats") {
+    syncAdminQuickInputsFromSheet();
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+    const nvInput = document.createElement("input");
+    nvInput.type = "number";
+    nvInput.id = "admin-fn-nv";
+    nvInput.value = state.adminDraftNv;
+    nvInput.min = "1";
+    nvInput.max = "99";
+    nvInput.style.cssText = "width: 66px; padding: 6px 8px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    nvInput.addEventListener("input", () => {
+      state.adminDraftNv = nvInput.value;
+    });
+
+    const rankSelect = document.createElement("select");
+    rankSelect.id = "admin-fn-rank";
+    rankSelect.style.cssText = "padding: 6px 8px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    ALLOWED_RANKS.forEach((rk) => {
+      const opt = document.createElement("option");
+      opt.value = rk;
+      opt.textContent = `Rank ${rk}`;
+      if (state.adminDraftRank === rk) opt.selected = true;
+      rankSelect.appendChild(opt);
+    });
+    rankSelect.addEventListener("change", () => {
+      state.adminDraftRank = rankSelect.value;
+    });
+
+    const slotsInput = document.createElement("input");
+    slotsInput.type = "number";
+    slotsInput.id = "admin-fn-slots";
+    slotsInput.value = state.adminDraftSlots;
+    slotsInput.min = "0";
+    slotsInput.max = "200";
+    slotsInput.style.cssText = "width: 74px; padding: 6px 8px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    slotsInput.addEventListener("input", () => {
+      state.adminDraftSlots = slotsInput.value;
+    });
+
+    const applyBtn = document.createElement("button");
+    applyBtn.type = "button";
+    applyBtn.textContent = "Aplicar e salvar";
+    applyBtn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: none; background: #356899; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+    applyBtn.addEventListener("click", () =>
+      handleAdminApplyQuickStats({
+        nv: nvInput.value,
+        rank: rankSelect.value,
+        slots: slotsInput.value
+      })
+    );
+
+    row.appendChild(nvInput);
+    row.appendChild(rankSelect);
+    row.appendChild(slotsInput);
+    row.appendChild(applyBtn);
+    box.appendChild(row);
+    return;
+  }
+
+  if (cmd === "/modelo") {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+    const sel = document.createElement("select");
+    sel.style.cssText = "flex: 1 1 200px; padding: 7px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    Object.entries(SHEET_TEMPLATES).forEach(([key, tpl]) => {
+      const opt = document.createElement("option");
+      opt.value = key;
+      opt.textContent = tpl.label;
+      if (state.adminDraftTemplate === key) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener("change", () => {
+      state.adminDraftTemplate = sel.value;
+    });
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Clonar modelo na ficha";
+    btn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: none; background: #6b4c9a; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+    btn.addEventListener("click", () => handleAdminApplyTemplate(sel.value));
+
+    row.appendChild(sel);
+    row.appendChild(btn);
+    box.appendChild(row);
+    return;
+  }
+
+  if (cmd === "/diff") {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Atualizar alterações pendentes";
+    btn.style.cssText = "align-self: flex-start; padding: 6px 10px; border-radius: 7px; border: 1px solid rgba(255,217,102,0.45); background: transparent; color: #ffd966; font-size: 12px; cursor: pointer;";
+    btn.addEventListener("click", handleAdminShowDiff);
+
+    const out = document.createElement("div");
+    out.textContent = state.adminDiffText || "Clique para verificar alterações pendentes.";
+    out.style.cssText = "font-size: 12px; color: #d6dee6; white-space: pre-wrap; word-break: break-word;";
+
+    row.appendChild(btn);
+    row.appendChild(out);
+    box.appendChild(row);
+    return;
+  }
+
+  if (cmd === "/json") {
+    const col = document.createElement("div");
+    col.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
+
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px;";
+
+    const expBtn = document.createElement("button");
+    expBtn.type = "button";
+    expBtn.textContent = "Exportar JSON";
+    expBtn.style.cssText = "padding: 6px 10px; border-radius: 7px; border: none; background: #2b8a6e; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+
+    const impBtn = document.createElement("button");
+    impBtn.type = "button";
+    impBtn.textContent = "Importar JSON colado";
+    impBtn.style.cssText = "padding: 6px 10px; border-radius: 7px; border: none; background: #356899; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+
+    const ta = document.createElement("textarea");
+    ta.rows = 3;
+    ta.value = state.adminDraftJson || "";
+    ta.placeholder = "JSON exportado ou colado para importar...";
+    ta.style.cssText = "width: 100%; padding: 8px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.2); background: #0a0e12; color: #d6dee6; font-family: monospace; font-size: 11px;";
+    ta.addEventListener("input", () => {
+      state.adminDraftJson = ta.value;
+    });
+
+    expBtn.addEventListener("click", () => {
+      handleAdminExportJson();
+      ta.value = state.adminDraftJson;
+    });
+    impBtn.addEventListener("click", () => handleAdminImportJson(ta.value));
+
+    btnRow.appendChild(expBtn);
+    btnRow.appendChild(impBtn);
+    col.appendChild(btnRow);
+    col.appendChild(ta);
+    box.appendChild(col);
+    return;
+  }
+
+  if (cmd === "/log") {
+    const ul = document.createElement("ul");
+    ul.style.cssText = "margin: 0; padding-left: 16px; max-height: 120px; overflow-y: auto; font-size: 11px; color: #d6dee6;";
+    if (!state.adminLogs.length) {
+      const li = document.createElement("li");
+      li.textContent = "Nenhuma ação registrada nesta sessão.";
+      ul.appendChild(li);
+    } else {
+      state.adminLogs.forEach((entry) => {
+        const li = document.createElement("li");
+        li.textContent = entry;
+        li.style.marginBottom = "3px";
+        ul.appendChild(li);
+      });
+    }
+    box.appendChild(ul);
+    return;
+  }
+
+  const helpList = document.createElement("ul");
+  helpList.style.cssText = "margin: 0; padding-left: 16px; font-size: 12px; color: #d6dee6;";
+  ADMIN_COMMAND_CATALOG.forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = `${item.syntax} — ${item.desc}`;
+    li.style.marginBottom = "3px";
+    helpList.appendChild(li);
+  });
+  box.appendChild(helpList);
 }
 
 function updateAdminBarUI() {
@@ -798,26 +1142,18 @@ function updateAdminBarUI() {
 
   if (!isCurrentUserAdmin()) {
     state.adminReadOnly = false;
-    state.adminModalOpen = false;
+    state.adminActiveCommand = "";
+    state.adminAllCommandsActive = false;
     applySheetReadOnlyState();
     if (bar) bar.hidden = true;
-    const modal = document.getElementById("admin-prompt-modal");
-    if (modal) modal.hidden = true;
     return;
   }
 
   ensureAdminBarElement();
-  ensureAdminPromptModalElement();
-
   const activeBar = document.getElementById("admin-uid-bar");
-  const activeInput = document.getElementById("admin-target-uid-input");
   const activeBadge = document.getElementById("admin-target-status");
-  const readOnlyBtn = document.getElementById("admin-toggle-readonly-btn");
 
   if (activeBar) activeBar.hidden = false;
-  if (activeInput && document.activeElement !== activeInput) {
-    activeInput.value = state.adminTargetUid || "";
-  }
   if (activeBadge) {
     const modeLabel = state.adminReadOnly ? " · SOMENTE LEITURA" : " · Edição ativa";
     if (state.adminTargetUid && state.adminTargetUid !== state.user.uid) {
@@ -826,19 +1162,11 @@ function updateAdminBarUI() {
       activeBadge.textContent = `Alvo: própria conta (${state.user.uid})${modeLabel}`;
     }
   }
-  if (readOnlyBtn) {
-    readOnlyBtn.textContent = state.adminReadOnly ? "Somente leitura: ON" : "Somente leitura: OFF";
-    readOnlyBtn.style.background = state.adminReadOnly ? "rgba(255, 217, 102, 0.22)" : "transparent";
-    readOnlyBtn.style.color = state.adminReadOnly ? "#ffd966" : "#e4e4ec";
-    readOnlyBtn.style.borderColor = state.adminReadOnly ? "#ffd966" : "rgba(255,255,255,0.25)";
-  }
 
   applySheetReadOnlyState();
-  updateAdminRecentUidsUI();
-  updateAdminNoticePreviewUI();
   syncAdminQuickInputsFromSheet();
-  renderAdminChatHistoryUI();
-  renderAdminLogsUI();
+  renderActiveCommandsStrip();
+  renderAdminCommandFunctionsBelow();
 }
 
 function ensureAdminBarElement() {
@@ -851,7 +1179,7 @@ function ensureAdminBarElement() {
   const bar = document.createElement("section");
   bar.id = "admin-uid-bar";
   bar.hidden = true;
-  bar.setAttribute("aria-label", "Chat e Barra de Comando do Administrador");
+  bar.setAttribute("aria-label", "Prompt de Comando do Administrador");
   bar.style.cssText = [
     "margin: 10px auto 12px",
     "padding: 12px 14px",
@@ -869,7 +1197,7 @@ function ensureAdminBarElement() {
   topRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;";
 
   const title = document.createElement("strong");
-  title.textContent = "Console / Chat do Admin (Ordem de Arkan)";
+  title.textContent = "Prompt de Comando Admin";
   title.style.cssText = "color: #ffd966; font-size: 13px;";
 
   const rightHeader = document.createElement("div");
@@ -879,52 +1207,37 @@ function ensureAdminBarElement() {
   statusSpan.id = "admin-target-status";
   statusSpan.style.cssText = "font-size: 12px; color: #b8c2cc; word-break: break-all;";
 
-  const openModalBtn = document.createElement("button");
-  openModalBtn.type = "button";
-  openModalBtn.id = "admin-open-prompt-btn";
-  openModalBtn.textContent = "Abrir Painel Admin";
-  openModalBtn.style.cssText = [
-    "padding: 6px 11px",
+  const allCmdsBtn = document.createElement("button");
+  allCmdsBtn.type = "button";
+  allCmdsBtn.id = "admin-toggle-all-cmds-btn";
+  allCmdsBtn.textContent = "Ativar todos os comandos";
+  allCmdsBtn.style.cssText = [
+    "padding: 6px 10px",
     "border-radius: 8px",
-    "border: none",
-    "background: #ffd966",
-    "color: #141920",
-    "font-weight: 700",
+    "border: 1px solid rgba(255,255,255,0.25)",
+    "background: transparent",
+    "color: #e4e4ec",
     "font-size: 12px",
     "cursor: pointer"
   ].join(";");
 
   rightHeader.appendChild(statusSpan);
-  rightHeader.appendChild(openModalBtn);
+  rightHeader.appendChild(allCmdsBtn);
   topRow.appendChild(title);
   topRow.appendChild(rightHeader);
 
-  const chatHistory = document.createElement("div");
-  chatHistory.id = "admin-chat-history";
-  chatHistory.style.cssText = [
-    "max-height: 92px",
-    "overflow-y: auto",
-    "padding: 8px 10px",
-    "border-radius: 8px",
-    "background: rgba(9, 13, 18, 0.88)",
-    "border: 1px solid rgba(255,255,255,0.12)",
-    "display: flex",
-    "flex-direction: column",
-    "gap: 4px"
-  ].join(";");
+  const promptForm = document.createElement("form");
+  promptForm.id = "admin-prompt-form";
+  promptForm.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
 
-  const chatForm = document.createElement("form");
-  chatForm.id = "admin-chat-command-form";
-  chatForm.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
-
-  const chatInput = document.createElement("input");
-  chatInput.type = "text";
-  chatInput.id = "admin-chat-command-input";
-  chatInput.placeholder = "Digite um comando (ex: /admin, /ajuda, /uid <UID>, /recado 30 Mensagem)...";
-  chatInput.autocomplete = "off";
-  chatInput.spellcheck = false;
-  chatInput.setAttribute("aria-label", "Comando do administrador");
-  chatInput.style.cssText = [
+  const promptInput = document.createElement("input");
+  promptInput.type = "text";
+  promptInput.id = "admin-prompt-input";
+  promptInput.placeholder = "Digite um comando (ex: /uid, /recado 30 Oi, /ler, /stats, /modelo, /diff, /json, /log)...";
+  promptInput.autocomplete = "off";
+  promptInput.spellcheck = false;
+  promptInput.setAttribute("aria-label", "Prompt de comando do administrador");
+  promptInput.style.cssText = [
     "flex: 1 1 220px",
     "min-width: 170px",
     "padding: 8px 10px",
@@ -935,10 +1248,10 @@ function ensureAdminBarElement() {
     "font-size: 13px"
   ].join(";");
 
-  const chatSendBtn = document.createElement("button");
-  chatSendBtn.type = "submit";
-  chatSendBtn.textContent = "Executar";
-  chatSendBtn.style.cssText = [
+  const execBtn = document.createElement("button");
+  execBtn.type = "submit";
+  execBtn.textContent = "Executar";
+  execBtn.style.cssText = [
     "padding: 8px 14px",
     "border-radius: 8px",
     "border: none",
@@ -949,12 +1262,23 @@ function ensureAdminBarElement() {
     "cursor: pointer"
   ].join(";");
 
-  chatForm.appendChild(chatInput);
-  chatForm.appendChild(chatSendBtn);
+  promptForm.appendChild(promptInput);
+  promptForm.appendChild(execBtn);
+
+  const allCmdsBox = document.createElement("div");
+  allCmdsBox.id = "admin-all-commands-box";
+  allCmdsBox.hidden = true;
+  allCmdsBox.style.cssText = "padding: 8px 10px; border-radius: 8px; background: rgba(10,14,18,0.72); border: 1px solid rgba(255,255,255,0.12);";
+
+  const functionsBelowPanel = document.createElement("div");
+  functionsBelowPanel.id = "admin-command-functions-panel";
+  functionsBelowPanel.hidden = true;
+  functionsBelowPanel.style.cssText = "padding: 10px 12px; border-radius: 8px; background: rgba(10,14,18,0.82); border: 1px solid rgba(255,217,102,0.3);";
 
   bar.appendChild(topRow);
-  bar.appendChild(chatHistory);
-  bar.appendChild(chatForm);
+  bar.appendChild(promptForm);
+  bar.appendChild(allCmdsBox);
+  bar.appendChild(functionsBelowPanel);
 
   if (mainEl && mainEl.parentNode === anchorParent) {
     anchorParent.insertBefore(bar, mainEl);
@@ -962,408 +1286,44 @@ function ensureAdminBarElement() {
     anchorParent.appendChild(bar);
   }
 
-  openModalBtn.addEventListener("click", () => setAdminModalVisibility(true));
-  chatForm.addEventListener("submit", handleAdminChatCommandSubmit);
+  allCmdsBtn.addEventListener("click", () => {
+    state.adminAllCommandsActive = !state.adminAllCommandsActive;
+    renderActiveCommandsStrip();
+  });
+
+  promptInput.addEventListener("input", () => {
+    const resolved = resolveCommandNameFromInput(promptInput.value);
+    state.adminActiveCommand = resolved;
+    renderActiveCommandsStrip();
+    renderAdminCommandFunctionsBelow();
+  });
+
+  promptForm.addEventListener("submit", handleAdminPromptSubmit);
 }
 
-function ensureAdminPromptModalElement() {
-  if (document.getElementById("admin-prompt-modal")) return;
-
-  const overlay = document.createElement("div");
-  overlay.id = "admin-prompt-modal";
-  overlay.hidden = true;
-  overlay.setAttribute("role", "dialog");
-  overlay.setAttribute("aria-modal", "true");
-  overlay.setAttribute("aria-label", "Prompt Completo de Funções do Administrador");
-  overlay.style.cssText = [
-    "position: fixed",
-    "inset: 0",
-    "z-index: 9999",
-    "background: rgba(5, 8, 12, 0.82)",
-    "display: flex",
-    "align-items: center",
-    "justify-content: center",
-    "padding: 12px",
-    "overflow-y: auto"
-  ].join(";");
-
-  const card = document.createElement("div");
-  card.style.cssText = [
-    "width: 100%",
-    "max-width: 760px",
-    "max-height: 90vh",
-    "overflow-y: auto",
-    "border-radius: 12px",
-    "border: 1px solid rgba(255, 217, 102, 0.55)",
-    "background: #141c24",
-    "color: #f2f4f8",
-    "padding: 16px",
-    "display: flex",
-    "flex-direction: column",
-    "gap: 12px",
-    "box-shadow: 0 18px 48px rgba(0,0,0,0.65)"
-  ].join(";");
-
-  const modalHeader = document.createElement("div");
-  modalHeader.style.cssText = "display: flex; justify-content: space-between; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.12); padding-bottom: 8px;";
-
-  const modalTitle = document.createElement("strong");
-  modalTitle.textContent = "Central Completa do Administrador (UID)";
-  modalTitle.style.cssText = "color: #ffd966; font-size: 15px;";
-
-  const closeBtn = document.createElement("button");
-  closeBtn.type = "button";
-  closeBtn.textContent = "Fechar ✕";
-  closeBtn.style.cssText = [
-    "padding: 6px 10px",
-    "border-radius: 8px",
-    "border: 1px solid rgba(255,255,255,0.25)",
-    "background: transparent",
-    "color: #fff",
-    "font-size: 12px",
-    "cursor: pointer"
-  ].join(";");
-
-  modalHeader.appendChild(modalTitle);
-  modalHeader.appendChild(closeBtn);
-
-  // 1. Seleção de UID e Somente Leitura
-  const uidRow = document.createElement("div");
-  uidRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
-
-  const input = document.createElement("input");
-  input.type = "text";
-  input.id = "admin-target-uid-input";
-  input.placeholder = "Cole o UID do jogador...";
-  input.autocomplete = "off";
-  input.spellcheck = false;
-  input.style.cssText = [
-    "flex: 1 1 200px",
-    "min-width: 150px",
-    "padding: 8px 10px",
-    "border-radius: 8px",
-    "border: 1px solid rgba(255,255,255,0.22)",
-    "background: #0a0e12",
-    "color: #fff",
-    "font-size: 13px"
-  ].join(";");
-
-  const loadBtn = document.createElement("button");
-  loadBtn.type = "button";
-  loadBtn.id = "admin-load-uid-btn";
-  loadBtn.textContent = "Carregar UID";
-  loadBtn.style.cssText = "padding: 8px 12px; border-radius: 8px; border: none; background: #2b8a6e; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
-
-  const selfBtn = document.createElement("button");
-  selfBtn.type = "button";
-  selfBtn.id = "admin-self-uid-btn";
-  selfBtn.textContent = "Minha ficha";
-  selfBtn.style.cssText = "padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #e4e4ec; font-size: 12px; cursor: pointer;";
-
-  const readOnlyBtn = document.createElement("button");
-  readOnlyBtn.type = "button";
-  readOnlyBtn.id = "admin-toggle-readonly-btn";
-  readOnlyBtn.textContent = "Somente leitura: OFF";
-  readOnlyBtn.style.cssText = "padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #e4e4ec; font-size: 12px; cursor: pointer;";
-
-  uidRow.appendChild(input);
-  uidRow.appendChild(loadBtn);
-  uidRow.appendChild(selfBtn);
-  uidRow.appendChild(readOnlyBtn);
-
-  const recentBox = document.createElement("div");
-  recentBox.id = "admin-recent-uids-box";
-  recentBox.hidden = true;
-  recentBox.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px; align-items: center;";
-
-  // 2. Mensagem temporária (Normal / Urgente até 24h)
-  const msgSection = document.createElement("div");
-  msgSection.style.cssText = "padding: 10px; border-radius: 8px; background: rgba(10,14,18,0.65); border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 8px;";
-
-  const msgTitle = document.createElement("strong");
-  msgTitle.textContent = "Recado Temporário para o UID (até 24h)";
-  msgTitle.style.cssText = "font-size: 12px; color: #ffd966;";
-
-  const msgRow = document.createElement("div");
-  msgRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch;";
-
-  const msgInput = document.createElement("input");
-  msgInput.type = "text";
-  msgInput.id = "admin-notice-text-input";
-  msgInput.maxLength = 600;
-  msgInput.placeholder = "Mensagem para o jogador...";
-  msgInput.style.cssText = "flex: 1 1 200px; min-width: 160px; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 13px;";
-
-  const prioritySelect = document.createElement("select");
-  prioritySelect.id = "admin-notice-priority-select";
-  prioritySelect.style.cssText = "padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
-  [
-    { value: "normal", label: "Prioridade: Normal" },
-    { value: "urgent", label: "Prioridade: URGENTE" }
-  ].forEach((p) => {
-    const opt = document.createElement("option");
-    opt.value = p.value;
-    opt.textContent = p.label;
-    prioritySelect.appendChild(opt);
-  });
-
-  const durationSelect = document.createElement("select");
-  durationSelect.id = "admin-notice-duration-select";
-  durationSelect.style.cssText = "padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #ffd966; font-size: 12px; font-weight: 600;";
-  NOTICE_DURATION_PRESETS.forEach((opt) => {
-    const optionEl = document.createElement("option");
-    optionEl.value = String(opt.minutes);
-    optionEl.textContent = opt.label;
-    if (opt.minutes === MAX_NOTICE_MINUTES) optionEl.selected = true;
-    durationSelect.appendChild(optionEl);
-  });
-
-  const sendNoticeBtn = document.createElement("button");
-  sendNoticeBtn.type = "button";
-  sendNoticeBtn.id = "admin-send-notice-btn";
-  sendNoticeBtn.textContent = "Enviar recado";
-  sendNoticeBtn.style.cssText = "padding: 8px 12px; border-radius: 8px; border: none; background: #c48b1b; color: #111; font-weight: 700; font-size: 12px; cursor: pointer;";
-
-  const clearNoticeBtn = document.createElement("button");
-  clearNoticeBtn.type = "button";
-  clearNoticeBtn.id = "admin-clear-notice-btn";
-  clearNoticeBtn.textContent = "Remover recado";
-  clearNoticeBtn.style.cssText = "padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #e4e4ec; font-size: 12px; cursor: pointer;";
-
-  msgRow.appendChild(msgInput);
-  msgRow.appendChild(prioritySelect);
-  msgRow.appendChild(durationSelect);
-  msgRow.appendChild(sendNoticeBtn);
-  msgRow.appendChild(clearNoticeBtn);
-
-  const previewEl = document.createElement("div");
-  previewEl.id = "admin-notice-preview";
-  previewEl.style.cssText = "font-size: 12px; color: #ffe082; word-break: break-word;";
-
-  msgSection.appendChild(msgTitle);
-  msgSection.appendChild(msgRow);
-  msgSection.appendChild(previewEl);
-
-  // 3. Ajuste rápido + Clonar ficha base (Templates)
-  const quickSection = document.createElement("div");
-  quickSection.style.cssText = "padding: 10px; border-radius: 8px; background: rgba(10,14,18,0.65); border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 8px;";
-
-  const quickTitle = document.createElement("strong");
-  quickTitle.textContent = "Ajuste Rápido e Fichas Base (Modelos)";
-  quickTitle.style.cssText = "font-size: 12px; color: #ffd966;";
-
-  const quickRow = document.createElement("div");
-  quickRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
-
-  const nvLabel = document.createElement("label");
-  nvLabel.htmlFor = "admin-quick-nv";
-  nvLabel.textContent = "Nível:";
-  nvLabel.style.fontSize = "12px";
-
-  const nvInput = document.createElement("input");
-  nvInput.type = "number";
-  nvInput.id = "admin-quick-nv";
-  nvInput.min = "1";
-  nvInput.max = "99";
-  nvInput.style.cssText = "width: 64px; padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
-
-  const rankLabel = document.createElement("label");
-  rankLabel.htmlFor = "admin-quick-rank";
-  rankLabel.textContent = "Rank:";
-  rankLabel.style.fontSize = "12px";
-
-  const rankSelect = document.createElement("select");
-  rankSelect.id = "admin-quick-rank";
-  rankSelect.style.cssText = "padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
-  ALLOWED_RANKS.forEach((rk) => {
-    const opt = document.createElement("option");
-    opt.value = rk;
-    opt.textContent = rk;
-    rankSelect.appendChild(opt);
-  });
-
-  const slotsLabel = document.createElement("label");
-  slotsLabel.htmlFor = "admin-quick-slots";
-  slotsLabel.textContent = "Espaços:";
-  slotsLabel.style.fontSize = "12px";
-
-  const slotsInput = document.createElement("input");
-  slotsInput.type = "number";
-  slotsInput.id = "admin-quick-slots";
-  slotsInput.min = "0";
-  slotsInput.max = "200";
-  slotsInput.style.cssText = "width: 68px; padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
-
-  const applyQuickBtn = document.createElement("button");
-  applyQuickBtn.type = "button";
-  applyQuickBtn.textContent = "Aplicar e salvar";
-  applyQuickBtn.style.cssText = "padding: 7px 10px; border-radius: 8px; border: none; background: #356899; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
-
-  quickRow.appendChild(nvLabel);
-  quickRow.appendChild(nvInput);
-  quickRow.appendChild(rankLabel);
-  quickRow.appendChild(rankSelect);
-  quickRow.appendChild(slotsLabel);
-  quickRow.appendChild(slotsInput);
-  quickRow.appendChild(applyQuickBtn);
-
-  const templateRow = document.createElement("div");
-  templateRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
-
-  const templateSelect = document.createElement("select");
-  templateSelect.id = "admin-template-select";
-  templateSelect.style.cssText = "flex: 1 1 200px; padding: 7px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
-  Object.entries(SHEET_TEMPLATES).forEach(([key, tpl]) => {
-    const opt = document.createElement("option");
-    opt.value = key;
-    opt.textContent = tpl.label;
-    templateSelect.appendChild(opt);
-  });
-
-  const applyTemplateBtn = document.createElement("button");
-  applyTemplateBtn.type = "button";
-  applyTemplateBtn.textContent = "Clonar modelo na ficha";
-  applyTemplateBtn.style.cssText = "padding: 7px 11px; border-radius: 8px; border: none; background: #6b4c9a; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
-
-  templateRow.appendChild(templateSelect);
-  templateRow.appendChild(applyTemplateBtn);
-
-  quickSection.appendChild(quickTitle);
-  quickSection.appendChild(quickRow);
-  quickSection.appendChild(templateRow);
-
-  // 4. Comparador (Diff) + Exportar / Importar JSON
-  const backupSection = document.createElement("div");
-  backupSection.style.cssText = "padding: 10px; border-radius: 8px; background: rgba(10,14,18,0.65); border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 8px;";
-
-  const backupTitle = document.createElement("strong");
-  backupTitle.textContent = "Comparar Alterações (Diff) e Backup JSON";
-  backupTitle.style.cssText = "font-size: 12px; color: #ffd966;";
-
-  const backupBtnRow = document.createElement("div");
-  backupBtnRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
-
-  const diffBtn = document.createElement("button");
-  diffBtn.type = "button";
-  diffBtn.textContent = "Ver alterações (Diff)";
-  diffBtn.style.cssText = "padding: 7px 10px; border-radius: 8px; border: 1px solid rgba(255,217,102,0.4); background: transparent; color: #ffd966; font-size: 12px; cursor: pointer;";
-
-  const exportBtn = document.createElement("button");
-  exportBtn.type = "button";
-  exportBtn.textContent = "Exportar JSON";
-  exportBtn.style.cssText = "padding: 7px 10px; border-radius: 8px; border: none; background: #2b8a6e; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
-
-  const importBtn = document.createElement("button");
-  importBtn.type = "button";
-  importBtn.textContent = "Importar JSON colado";
-  importBtn.style.cssText = "padding: 7px 10px; border-radius: 8px; border: none; background: #356899; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
-
-  backupBtnRow.appendChild(diffBtn);
-  backupBtnRow.appendChild(exportBtn);
-  backupBtnRow.appendChild(importBtn);
-
-  const jsonTextarea = document.createElement("textarea");
-  jsonTextarea.id = "admin-json-textarea";
-  jsonTextarea.rows = 3;
-  jsonTextarea.placeholder = "O JSON exportado aparece aqui, ou cole um JSON de ficha para importar...";
-  jsonTextarea.style.cssText = "width: 100%; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: #0a0e12; color: #d6dee6; font-family: monospace; font-size: 11px;";
-
-  const diffOutput = document.createElement("div");
-  diffOutput.id = "admin-diff-output";
-  diffOutput.style.cssText = "font-size: 12px; color: #b8c2cc; white-space: pre-wrap; word-break: break-word;";
-
-  backupSection.appendChild(backupTitle);
-  backupSection.appendChild(backupBtnRow);
-  backupSection.appendChild(jsonTextarea);
-  backupSection.appendChild(diffOutput);
-
-  // 5. Log da Sessão do Admin
-  const logSection = document.createElement("div");
-  logSection.style.cssText = "padding: 10px; border-radius: 8px; background: rgba(10,14,18,0.65); border: 1px solid rgba(255,255,255,0.1);";
-
-  const logTitle = document.createElement("strong");
-  logTitle.textContent = "Log da Sessão do Admin";
-  logTitle.style.cssText = "display: block; font-size: 12px; color: #ffd966; margin-bottom: 6px;";
-
-  const logList = document.createElement("ul");
-  logList.id = "admin-session-log-list";
-  logList.style.cssText = "margin: 0; padding-left: 16px; max-height: 110px; overflow-y: auto; font-size: 11px; color: #d6dee6;";
-
-  logSection.appendChild(logTitle);
-  logSection.appendChild(logList);
-
-  card.appendChild(modalHeader);
-  card.appendChild(uidRow);
-  card.appendChild(recentBox);
-  card.appendChild(msgSection);
-  card.appendChild(quickSection);
-  card.appendChild(backupSection);
-  card.appendChild(logSection);
-  overlay.appendChild(card);
-  document.body.appendChild(overlay);
-
-  closeBtn.addEventListener("click", () => setAdminModalVisibility(false));
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) setAdminModalVisibility(false);
-  });
-
-  loadBtn.addEventListener("click", handleAdminLoadTargetUid);
-  selfBtn.addEventListener("click", handleAdminReturnToOwnSheet);
-  readOnlyBtn.addEventListener("click", handleAdminToggleReadOnly);
-  applyQuickBtn.addEventListener("click", handleAdminApplyQuickStats);
-  applyTemplateBtn.addEventListener("click", () => handleAdminApplyTemplate(templateSelect.value));
-  sendNoticeBtn.addEventListener("click", handleAdminSendNotice);
-  clearNoticeBtn.addEventListener("click", handleAdminClearNotice);
-  diffBtn.addEventListener("click", handleAdminShowDiff);
-  exportBtn.addEventListener("click", handleAdminExportJson);
-  importBtn.addEventListener("click", handleAdminImportJson);
-}
-
-async function handleAdminChatCommandSubmit(event) {
+async function handleAdminPromptSubmit(event) {
   event.preventDefault();
   if (event && event.isTrusted === false) return;
   if (!isCurrentUserAdmin()) return;
 
-  const input = document.getElementById("admin-chat-command-input");
+  const input = document.getElementById("admin-prompt-input");
   const raw = sanitizeText(input ? input.value : "", 700).trim();
   if (!raw) return;
-  if (input) input.value = "";
 
-  appendAdminChatMessage("admin", raw);
   const parts = raw.split(/\s+/);
-  const cmd = parts[0].toLowerCase();
-
-  if (cmd === "/admin" || cmd === "/painel" || cmd === "/menu" || cmd === "admin") {
-    setAdminModalVisibility(true);
-    appendAdminChatMessage("sys", "Painel completo de administração aberto.");
-    return;
-  }
-
-  if (cmd === "/fechar") {
-    setAdminModalVisibility(false);
-    appendAdminChatMessage("sys", "Painel completo fechado.");
-    return;
-  }
-
-  if (cmd === "/ajuda" || cmd === "/help") {
-    appendAdminChatMessage(
-      "sys",
-      "Comandos: /admin (abre painel) | /uid <UID> | /minha | /ler on|off | /recado <min> <texto> | /urgente <min> <texto> | /remover | /modelo <iniciante|veterano|elite> | /diff | /exportar | /log"
-    );
-    return;
-  }
+  const cmd = resolveCommandNameFromInput(parts[0]);
+  state.adminActiveCommand = cmd;
+  renderActiveCommandsStrip();
 
   if (cmd === "/uid" && parts[1]) {
-    const uidInput = document.getElementById("admin-target-uid-input");
-    if (uidInput) uidInput.value = parts[1];
-    await handleAdminLoadTargetUid();
-    appendAdminChatMessage("sys", `Tentativa de carregamento do UID ${parts[1]}.`);
+    state.adminDraftUid = parts[1];
+    await handleAdminLoadTargetUid(parts[1]);
     return;
   }
 
   if (cmd === "/minha") {
     await handleAdminReturnToOwnSheet();
-    appendAdminChatMessage("sys", "Retornado para a sua própria ficha.");
+    renderAdminCommandFunctionsBelow();
     return;
   }
 
@@ -1371,79 +1331,59 @@ async function handleAdminChatCommandSubmit(event) {
     const arg = (parts[1] || "").toLowerCase();
     if (arg === "on" && !state.adminReadOnly) handleAdminToggleReadOnly();
     else if (arg === "off" && state.adminReadOnly) handleAdminToggleReadOnly();
-    else handleAdminToggleReadOnly();
-    appendAdminChatMessage("sys", `Somente leitura: ${state.adminReadOnly ? "ON" : "OFF"}.`);
+    else if (!arg) handleAdminToggleReadOnly();
+    renderAdminCommandFunctionsBelow();
     return;
   }
 
   if ((cmd === "/recado" || cmd === "/urgente") && parts.length >= 3) {
     const minutes = normalizeNoticeMinutes(parts[1]);
     const text = parts.slice(2).join(" ");
-    const msgInput = document.getElementById("admin-notice-text-input");
-    const durSelect = document.getElementById("admin-notice-duration-select");
-    const prioSelect = document.getElementById("admin-notice-priority-select");
-    if (msgInput) msgInput.value = text;
-    if (durSelect) {
-      const exists = Array.from(durSelect.options).some((o) => Number(o.value) === minutes);
-      if (!exists) {
-        const customOpt = document.createElement("option");
-        customOpt.value = String(minutes);
-        customOpt.textContent = formatDurationLabel(minutes);
-        durSelect.appendChild(customOpt);
-      }
-      durSelect.value = String(minutes);
-    }
-    if (prioSelect) prioSelect.value = cmd === "/urgente" ? "urgent" : "normal";
-    await handleAdminSendNotice();
-    appendAdminChatMessage("sys", `Recado enviado (${formatDurationLabel(minutes)}).`);
+    const priority = cmd === "/urgente" ? "urgent" : state.adminDraftNoticePriority;
+    state.adminDraftNoticeText = text;
+    state.adminDraftNoticeMinutes = minutes;
+    state.adminDraftNoticePriority = priority;
+    await handleAdminSendNotice({ text, minutes, priority });
+    renderAdminCommandFunctionsBelow();
     return;
   }
 
   if (cmd === "/remover") {
     await handleAdminClearNotice();
-    appendAdminChatMessage("sys", "Comando de remoção de recado executado.");
+    renderAdminCommandFunctionsBelow();
     return;
   }
 
   if (cmd === "/modelo" && parts[1]) {
+    state.adminDraftTemplate = parts[1].toLowerCase();
     await handleAdminApplyTemplate(parts[1].toLowerCase());
-    appendAdminChatMessage("sys", `Modelo "${parts[1].toLowerCase()}" aplicado.`);
+    renderAdminCommandFunctionsBelow();
     return;
   }
 
   if (cmd === "/diff") {
-    const changes = computeSheetDiffList();
-    setAdminModalVisibility(true);
     handleAdminShowDiff();
-    appendAdminChatMessage("sys", `${changes.length} campo(s) alterado(s) desde o carregamento.`);
+    renderAdminCommandFunctionsBelow();
     return;
   }
 
-  if (cmd === "/exportar") {
-    setAdminModalVisibility(true);
-    handleAdminExportJson();
-    appendAdminChatMessage("sys", "JSON da ficha gerado no painel.");
+  if (cmd === "/json") {
+    if ((parts[1] || "").toLowerCase() === "exportar") {
+      handleAdminExportJson();
+    }
+    renderAdminCommandFunctionsBelow();
     return;
   }
 
-  if (cmd === "/log") {
-    setAdminModalVisibility(true);
-    appendAdminChatMessage("sys", `Total de ${state.adminLogs.length} evento(s) no log.`);
-    return;
-  }
-
-  appendAdminChatMessage("sys", "Comando não reconhecido. Digite /admin para abrir o painel ou /ajuda.");
+  renderAdminCommandFunctionsBelow();
 }
 
 function handleAdminShowDiff() {
-  const diffOutput = document.getElementById("admin-diff-output");
-  if (!diffOutput) return;
   const changes = computeSheetDiffList();
-  if (!changes.length) {
-    diffOutput.textContent = "Nenhuma alteração pendente em relação à ficha carregada.";
-    return;
-  }
-  diffOutput.textContent = `Alterações detectadas (${changes.length}):\n• ${changes.slice(0, 25).join("\n• ")}`;
+  state.adminDiffText = changes.length
+    ? `Alterações detectadas (${changes.length}):\n• ${changes.slice(0, 25).join("\n• ")}`
+    : "Nenhuma alteração pendente em relação à ficha carregada.";
+  renderAdminCommandFunctionsBelow();
 }
 
 function handleAdminExportJson() {
@@ -1455,8 +1395,7 @@ function handleAdminExportJson() {
     fields: payload.fields
   };
   const serialized = JSON.stringify(exportObj, null, 2);
-  const textarea = document.getElementById("admin-json-textarea");
-  if (textarea) textarea.value = serialized;
+  state.adminDraftJson = serialized;
 
   try {
     const blob = new Blob([serialized], { type: "application/json" });
@@ -1469,24 +1408,23 @@ function handleAdminExportJson() {
     a.remove();
     URL.revokeObjectURL(url);
   } catch {
-    // Fallback: JSON já está copiado na textarea do modal
+    // Fallback: JSON exibido na caixa abaixo do comando
   }
 
   appendAdminLog(`JSON exportado do UID ${getActiveTargetUid()}`);
   setStatusBanner("Backup JSON gerado com sucesso.", "success");
 }
 
-async function handleAdminImportJson() {
+async function handleAdminImportJson(rawJsonText) {
   if (!isCurrentUserAdmin()) return;
   if (isInspectionReadOnlyActive()) {
     setStatusBanner("Desative 'Somente leitura' antes de importar um JSON.", "warning");
     return;
   }
 
-  const textarea = document.getElementById("admin-json-textarea");
-  const raw = textarea ? textarea.value.trim() : "";
+  const raw = String(rawJsonText ?? state.adminDraftJson ?? "").trim();
   if (!raw || raw.length > 500000) {
-    setStatusBanner("Cole um JSON válido na caixa antes de importar.", "warning");
+    setStatusBanner("Cole um JSON válido antes de importar.", "warning");
     return;
   }
 
@@ -1505,7 +1443,7 @@ async function handleAdminImportJson() {
     });
 
     applySheetData({ fields: safeFields });
-    appendAdminLog(`JSON importado na tela para UID ${getActiveTargetUid()}`);
+    appendAdminLog(`JSON importado para UID ${getActiveTargetUid()}`);
     await persistSheet(true);
   } catch {
     setStatusBanner("Erro ao ler o JSON colado. Verifique a sintaxe.", "error");
@@ -1560,47 +1498,39 @@ function handleAdminToggleReadOnly(event) {
   );
 }
 
-async function handleAdminApplyQuickStats(event) {
-  if (event && event.isTrusted === false) return;
+async function handleAdminApplyQuickStats(overrideValues) {
   if (!isCurrentUserAdmin()) return;
 
-  const nvInput = document.getElementById("admin-quick-nv");
-  const rankSelect = document.getElementById("admin-quick-rank");
-  const slotsInput = document.getElementById("admin-quick-slots");
+  const nvVal = overrideValues && overrideValues.nv !== undefined ? overrideValues.nv : state.adminDraftNv;
+  const rankVal = overrideValues && overrideValues.rank !== undefined ? overrideValues.rank : state.adminDraftRank;
+  const slotsVal = overrideValues && overrideValues.slots !== undefined ? overrideValues.slots : state.adminDraftSlots;
 
   const sheetNv = document.getElementById("nv-val");
   const sheetRank = document.getElementById("rank-val");
   const sheetSlots = document.getElementById("espacos-max");
 
-  if (sheetNv && nvInput) {
-    sheetNv.value = normalizeNumericValue("nv-val", nvInput.value);
-  }
-  if (sheetRank && rankSelect) {
-    sheetRank.value = normalizeRankValue(rankSelect.value);
-  }
-  if (sheetSlots && slotsInput) {
-    sheetSlots.value = normalizeNumericValue("espacos-max", slotsInput.value);
-  }
+  if (sheetNv) sheetNv.value = normalizeNumericValue("nv-val", nvVal);
+  if (sheetRank) sheetRank.value = normalizeRankValue(rankVal);
+  if (sheetSlots) sheetSlots.value = normalizeNumericValue("espacos-max", slotsVal);
 
   recalculateSkillsTable();
   appendAdminLog(`Ajuste rápido salvo no UID ${getActiveTargetUid()}`);
   await persistSheet(true);
 }
 
-async function handleAdminLoadTargetUid(event) {
-  if (event && event.isTrusted === false) return;
+async function handleAdminLoadTargetUid(rawUidOverride) {
   if (!isCurrentUserAdmin()) {
     setStatusBanner("Apenas o administrador autorizado pode carregar fichas por UID.", "error");
     return;
   }
 
-  const input = document.getElementById("admin-target-uid-input");
-  const uid = sanitizeTargetUid(input ? input.value : "");
+  const uid = sanitizeTargetUid(rawUidOverride !== undefined ? rawUidOverride : state.adminDraftUid);
   if (!uid) {
     setStatusBanner("Informe um UID válido para carregar a ficha do jogador.", "warning");
     return;
   }
 
+  state.adminDraftUid = uid;
   state.adminTargetUid = uid;
   saveAdminTargetUidToStorage(uid);
   recordRecentAdminUid(uid);
@@ -1616,6 +1546,7 @@ async function handleAdminReturnToOwnSheet(event) {
   if (!state.user || !state.user.uid) return;
 
   state.adminTargetUid = "";
+  state.adminDraftUid = "";
   saveAdminTargetUidToStorage("");
   state.lastSavedSnapshot = "";
   updateAdminBarUI();
@@ -1624,27 +1555,25 @@ async function handleAdminReturnToOwnSheet(event) {
   await loadFromFirestore(state.user.uid);
 }
 
-async function handleAdminSendNotice(event) {
-  if (event && event.isTrusted === false) return;
+async function handleAdminSendNotice(overrideData) {
   if (!isCurrentUserAdmin() || !state.firebaseReady || !state.db) {
     setStatusBanner("Apenas o admin conectado ao Firebase pode enviar recados.", "error");
     return;
   }
 
-  const uidInput = document.getElementById("admin-target-uid-input");
-  const msgInput = document.getElementById("admin-notice-text-input");
-  const durSelect = document.getElementById("admin-notice-duration-select");
-  const prioSelect = document.getElementById("admin-notice-priority-select");
-
-  const targetUid = sanitizeTargetUid(uidInput && uidInput.value ? uidInput.value : state.adminTargetUid);
+  const targetUid = sanitizeTargetUid(state.adminTargetUid || state.adminDraftUid || state.user.uid);
   if (!targetUid) {
-    setStatusBanner("Digite ou carregue um UID válido para enviar a mensagem.", "warning");
+    setStatusBanner("Carregue ou informe um UID válido para enviar a mensagem.", "warning");
     return;
   }
 
-  const minutes = normalizeNoticeMinutes(durSelect ? durSelect.value : MAX_NOTICE_MINUTES);
-  const priority = normalizeNoticePriority(prioSelect ? prioSelect.value : "normal");
-  const encodedPayload = buildEncodedNoticePayload(msgInput ? msgInput.value : "", minutes, priority);
+  const rawText = overrideData && overrideData.text !== undefined ? overrideData.text : state.adminDraftNoticeText;
+  const rawMin = overrideData && overrideData.minutes !== undefined ? overrideData.minutes : state.adminDraftNoticeMinutes;
+  const rawPrio = overrideData && overrideData.priority !== undefined ? overrideData.priority : state.adminDraftNoticePriority;
+
+  const minutes = normalizeNoticeMinutes(rawMin);
+  const priority = normalizeNoticePriority(rawPrio);
+  const encodedPayload = buildEncodedNoticePayload(rawText, minutes, priority);
   if (!encodedPayload) {
     setStatusBanner("Escreva uma mensagem antes de enviar.", "warning");
     return;
@@ -1653,7 +1582,6 @@ async function handleAdminSendNotice(event) {
   state.adminTargetUid = targetUid;
   saveAdminTargetUidToStorage(targetUid);
   recordRecentAdminUid(targetUid);
-  updateAdminBarUI();
 
   const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
   const docRef = doc(state.db, FIRESTORE_COLLECTION, targetUid);
@@ -1673,22 +1601,20 @@ async function handleAdminSendNotice(event) {
     });
     nextFields[ADMIN_NOTICE_FIELD_KEY] = encodedPayload;
 
-    const payloadToSave = {
+    await setDoc(docRef, {
       fields: nextFields,
       atualizadoEm: new Date().toISOString()
-    };
-
-    await setDoc(docRef, payloadToSave);
+    });
     state.lastCloudWriteAt = Date.now();
 
-    if (msgInput) msgInput.value = "";
+    state.adminDraftNoticeText = "";
     if (getActiveTargetUid() === targetUid) {
       state.activeNotice = parseActiveNoticeFromFields(nextFields);
       scheduleNoticeExpiryCheck();
       renderPlayerNoticeBanner();
-      updateAdminNoticePreviewUI();
     }
 
+    renderAdminCommandFunctionsBelow();
     appendAdminLog(`Recado (${priority === "urgent" ? "Urgente" : "Normal"}, ${formatDurationLabel(minutes)}) enviado para ${targetUid}`);
     setStatusBanner(
       `Mensagem enviada para o UID ${targetUid} (duração: ${formatDurationLabel(minutes)}).`,
@@ -1709,8 +1635,7 @@ async function handleAdminClearNotice(event) {
   if (event && event.isTrusted === false) return;
   if (!isCurrentUserAdmin() || !state.firebaseReady || !state.db) return;
 
-  const uidInput = document.getElementById("admin-target-uid-input");
-  const targetUid = sanitizeTargetUid(uidInput && uidInput.value ? uidInput.value : state.adminTargetUid);
+  const targetUid = sanitizeTargetUid(state.adminTargetUid || state.adminDraftUid || state.user.uid);
   if (!targetUid) {
     setStatusBanner("Informe um UID válido para remover o recado.", "warning");
     return;
@@ -1748,9 +1673,9 @@ async function handleAdminClearNotice(event) {
       state.activeNotice = null;
       scheduleNoticeExpiryCheck();
       renderPlayerNoticeBanner();
-      updateAdminNoticePreviewUI();
     }
 
+    renderAdminCommandFunctionsBelow();
     appendAdminLog(`Recado removido do UID ${targetUid}`);
     setStatusBanner(`Recado removido do UID ${targetUid}.`, "success");
   } catch {
@@ -2171,18 +2096,17 @@ function applySheetData(data) {
     state.activeNotice = null;
     scheduleNoticeExpiryCheck();
     renderPlayerNoticeBanner();
-    updateAdminNoticePreviewUI();
     recalculateSkillsTable();
     syncNenCategoryFromSelect();
     syncAdminQuickInputsFromSheet();
     captureBaselineFields(collectSheetData().fields);
+    renderAdminCommandFunctionsBelow();
     return;
   }
 
   state.activeNotice = parseActiveNoticeFromFields(data.fields);
   scheduleNoticeExpiryCheck();
   renderPlayerNoticeBanner();
-  updateAdminNoticePreviewUI();
 
   const mainEl = document.querySelector("main.container");
   if (!mainEl) return;
@@ -2209,6 +2133,7 @@ function applySheetData(data) {
   syncNenCategoryFromSelect();
   syncAdminQuickInputsFromSheet();
   applySheetReadOnlyState();
+  renderAdminCommandFunctionsBelow();
 }
 
 function resetSheetFieldsToDefault() {
@@ -2390,22 +2315,27 @@ async function initFirebase() {
         state.offlineMode = false;
         if (user.uid === ADMIN_UID) {
           state.adminTargetUid = loadAdminTargetUidFromStorage();
+          state.adminDraftUid = state.adminTargetUid;
           state.adminRecentUids = loadRecentAdminUidsFromStorage();
           if (state.adminTargetUid) recordRecentAdminUid(state.adminTargetUid);
         } else {
           state.adminTargetUid = "";
+          state.adminDraftUid = "";
           state.adminRecentUids = [];
           state.adminReadOnly = false;
-          state.adminModalOpen = false;
+          state.adminActiveCommand = "";
+          state.adminAllCommandsActive = false;
           saveAdminTargetUidToStorage("");
         }
         clearAuthSensitiveInputs();
         setEntradaStatus("");
       } else {
         state.adminTargetUid = "";
+        state.adminDraftUid = "";
         state.adminRecentUids = [];
         state.adminReadOnly = false;
-        state.adminModalOpen = false;
+        state.adminActiveCommand = "";
+        state.adminAllCommandsActive = false;
         state.activeNotice = null;
         scheduleNoticeExpiryCheck();
         saveAdminTargetUidToStorage("");
@@ -2460,7 +2390,6 @@ async function loadFromFirestore(uid) {
       state.activeNotice = null;
       scheduleNoticeExpiryCheck();
       renderPlayerNoticeBanner();
-      updateAdminNoticePreviewUI();
       resetSheetFieldsToDefault();
       const initialData = buildSanitizedCloudPayload();
       await setDoc(docRef, initialData);
@@ -2470,6 +2399,7 @@ async function loadFromFirestore(uid) {
       if (!isCurrentUserAdmin() || uid === state.user?.uid) {
         saveLocalData(initialData);
       }
+      renderAdminCommandFunctionsBelow();
       setStatusBanner(
         isCurrentUserAdmin() && uid !== state.user?.uid
           ? `Nova ficha criada para o UID alvo (${uid}).`
@@ -2518,7 +2448,6 @@ async function handleClearSheetData(event) {
   state.activeNotice = null;
   scheduleNoticeExpiryCheck();
   renderPlayerNoticeBanner();
-  updateAdminNoticePreviewUI();
   resetSheetFieldsToDefault();
   if (!isRemoteTarget) {
     clearLocalData();
@@ -2599,9 +2528,11 @@ async function handleLogout(event) {
   if (event && event.isTrusted === false) return;
   state.offlineMode = false;
   state.adminTargetUid = "";
+  state.adminDraftUid = "";
   state.adminRecentUids = [];
   state.adminReadOnly = false;
-  state.adminModalOpen = false;
+  state.adminActiveCommand = "";
+  state.adminAllCommandsActive = false;
   state.activeNotice = null;
   scheduleNoticeExpiryCheck();
   saveAdminTargetUidToStorage("");
@@ -2646,9 +2577,11 @@ async function handleDeleteAccount(event) {
     clearAuthSensitiveInputs();
     state.offlineMode = false;
     state.adminTargetUid = "";
+    state.adminDraftUid = "";
     state.adminRecentUids = [];
     state.adminReadOnly = false;
-    state.adminModalOpen = false;
+    state.adminActiveCommand = "";
+    state.adminAllCommandsActive = false;
     state.activeNotice = null;
     scheduleNoticeExpiryCheck();
     saveAdminTargetUidToStorage("");
@@ -2955,7 +2888,7 @@ function bindEvents() {
   }
 
   if (deleteCancelBtn && deleteConfirmBox) {
-    deleteCancelBtn.addEventListener("click", () => {
+    deleteConfirmBox.addEventListener("click", () => {
       deleteConfirmBox.hidden = true;
     });
   }
