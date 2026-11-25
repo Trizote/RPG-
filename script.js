@@ -4,6 +4,7 @@
    + Firebase Authentication & Cloud Firestore + Sessão Offline/Local temporária
    + Exclusão de ficha e exclusão de conta
    + Sincronização precisa das seções no topo conforme a rolagem
+   + Cores dinâmicas conforme a Categoria Principal de Afinidade de Nen
    Criador: Lucas Ramalho Gavasso Trizote
    ========================================================================== */
 
@@ -35,6 +36,15 @@ const TRACKED_SECTIONS = Object.freeze([
   { id: "privacidade-lgpd", label: "Privacidade (LGPD)" }
 ]);
 
+const NEN_CATEGORIES_MAP = Object.freeze({
+  reforco: "reforco",
+  emissao: "emissao",
+  transformacao: "transformacao",
+  materializacao: "materializacao",
+  manipulacao: "manipulacao",
+  especializacao: "especializacao"
+});
+
 const state = {
   user: null,
   offlineMode: false,
@@ -46,6 +56,7 @@ const state = {
   showPassword: false,
   cookieConsentAccepted: false,
   activeSectionId: "dados-agente",
+  nenCategory: "",
   scrollRafId: null,
   saveTimer: null,
   isSaving: false,
@@ -97,6 +108,62 @@ function initConsoleSecurityGuard() {
   } catch {
     // Ignora caso console esteja restrito
   }
+}
+
+/* --------------------------------------------------------------------------
+   Cores Dinâmicas por Categoria Principal de Afinidade de Nen
+   -------------------------------------------------------------------------- */
+function normalizeNenCategoryKey(value) {
+  if (typeof value !== "string") return "";
+  const normalized = value
+    .normalize("NFD")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+
+  return Object.prototype.hasOwnProperty.call(NEN_CATEGORIES_MAP, normalized)
+    ? NEN_CATEGORIES_MAP[normalized]
+    : "";
+}
+
+function highlightNenCategoryRow(categoryKey) {
+  const nenSection = document.querySelector(".coluna-nen");
+  if (!nenSection) return;
+
+  const rows = nenSection.querySelectorAll(".tabela-nen tbody tr");
+  rows.forEach((row) => {
+    const firstCellText = row.cells && row.cells[0] ? row.cells[0].textContent || "" : "";
+    const rowKey = normalizeNenCategoryKey(firstCellText);
+    const isMatch = Boolean(categoryKey) && rowKey === categoryKey;
+    row.classList.toggle("nen-linha-ativa", isMatch);
+  });
+}
+
+function applyNenCategoryTheme(rawValue) {
+  const key = normalizeNenCategoryKey(rawValue);
+  state.nenCategory = key;
+
+  if (key) {
+    document.documentElement.setAttribute("data-nen-categoria", key);
+  } else {
+    document.documentElement.removeAttribute("data-nen-categoria");
+  }
+
+  highlightNenCategoryRow(key);
+}
+
+function syncNenCategoryFromSelect() {
+  const selectEl = document.getElementById("categoria-principal-nen");
+  if (!selectEl) {
+    applyNenCategoryTheme("");
+    return;
+  }
+  const selectedText =
+    selectEl.options && selectEl.selectedIndex >= 0
+      ? selectEl.options[selectEl.selectedIndex].textContent || ""
+      : "";
+  applyNenCategoryTheme(selectEl.value || selectedText);
 }
 
 function setStatusBanner(message, type = "info") {
@@ -243,6 +310,7 @@ function updateScreenAccess() {
   }
 
   if (hasSession) {
+    syncNenCategoryFromSelect();
     window.requestAnimationFrame(() => {
       syncActiveSectionOnScroll();
     });
@@ -332,6 +400,7 @@ function buildSanitizedCloudPayload() {
 
 function applySheetData(data) {
   if (!data || typeof data !== "object" || !data.fields || typeof data.fields !== "object") {
+    syncNenCategoryFromSelect();
     return;
   }
 
@@ -354,6 +423,8 @@ function applySheetData(data) {
         : sanitizeSingleLine(String(savedVal), 250);
     }
   });
+
+  syncNenCategoryFromSelect();
 }
 
 function resetSheetFieldsToDefault() {
@@ -393,6 +464,8 @@ function resetSheetFieldsToDefault() {
       ctrl.value = "";
     }
   });
+
+  syncNenCategoryFromSelect();
 }
 
 function saveLocalData(data) {
@@ -766,6 +839,18 @@ function bindEvents() {
   window.addEventListener("scroll", scheduleScrollSectionSync, { passive: true });
   window.addEventListener("resize", scheduleScrollSectionSync, { passive: true });
 
+  const nenSelect = document.getElementById("categoria-principal-nen");
+  if (nenSelect) {
+    nenSelect.addEventListener("change", (event) => {
+      const target = event.target;
+      const selectedOptionText =
+        target && target.options && target.selectedIndex >= 0
+          ? target.options[target.selectedIndex].textContent || ""
+          : "";
+      applyNenCategoryTheme((target && target.value) || selectedOptionText);
+    });
+  }
+
   const navLinks = document.querySelectorAll(".abas .aba-btn[data-secao-alvo]");
   navLinks.forEach((link) => {
     link.addEventListener("click", () => {
@@ -902,6 +987,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const localData = loadLocalData();
   if (localData) {
     applySheetData(localData);
+  } else {
+    syncNenCategoryFromSelect();
   }
 
   setActiveSectionIndicator("dados-agente");

@@ -14,6 +14,153 @@
   --texto-principal: #eaf4f6;
   --texto-suave: #a8c4cb;
   --sombra-card: 0 12px 28px rgba(2, 10, 15, 0.56);
+
+  /* Variáveis dinâmicas da Afinidade de Nen */
+  --nen-primaria: #3ca888;
+  --nen-secundaria: #2699bc;
+  --nen-borda: rgba(130, 210, 224, 0.28);
+  --nen-destaque: #f4c95d;
+  --nen-fundo-suave: rgba(38, 153, 188, 0.12);
+  --nen-texto-contraste: #051116;
+}
+
+/* Reforço: verde / amarelo-dourado */
+html[data-nen-categoria="reforco"] {
+  --nen-primaria: #22c55e;
+  --nen-secundaria: #eab308;
+  --nen-borda: rgba(34, 197, 94, 0.6);
+  --nen-destaque: #fde047;
+  --nen-fundo-suave: rgba(34, 197, 94, 0.16);
+  --nen-texto-contraste: #06150b;
+}
+
+/* Emissão: azul / laranja */
+html[data-nen-categoria="emissao"] {
+  --nen-primaria: #2563eb;
+  --nen-secundaria: #f97316;
+  --nen-borda: rgba(59, 130, 246, 0.6);
+  --nen-destaque: #fdba74;
+  --nen-fundo-suave: rgba(249, 115, 22, 0.15);
+  --nen-texto-contraste: #ffffff;
+}
+
+/* Transformação: rosa/magenta / azul-claro-elétrico */
+html[data-nen-categoria="transformacao"] {
+  --nen-primaria: #ec4899;
+  --nen-secundaria: #38bdf8;
+  --nen-borda: rgba(236, 72, 153, 0.62);
+  --nen-destaque: #f9a8d4;
+  --nen-fundo-suave: rgba(56, 189, 248, 0.15);
+  --nen-texto-contraste: #14040c;
+}
+
+/* Materialização: vermelho / azul-escuro */
+html[data-nen-categoria="materializacao"] {
+  --nen-primaria: #ef4444;
+  --nen-secundaria: #1e3a8a;
+  --nen-borda: rgba(239, 68, 68, 0.62);
+  --nen-destaque: #fca5a5;
+  --nen-fundo-suave: rgba(239, 68, 68, 0.15);
+  --nen-texto-contraste: #ffffff;
+}
+
+/* Manipulação: roxo / violeta */
+html[data-nen-categoria="manipulacao"] {
+  --nen-primaria: #a855f7;
+  --nen-secundaria: #8b5cf6;
+  --nen-borda: rgba(168, 85, 247, 0.62);
+  --nen-destaque: #d8b4fe;
+  --nen-fundo-suave: rgba(168, 85, 247, 0.16);
+  --nen-texto-contraste: #ffffff;
+}
+
+/* Especialização: preto / branco / roxo-escuro */
+html[data-nen-categoria="especializacao"] {
+  --nen-primaria: #581c87;
+  --nen-secundaria: #f8fafc;
+  --nen-borda: rgba(248, 250, 252, 0.52);
+  --nen-destaque: #ffffff;
+  --nen-fundo-suave: rgba(88, 28, 135, 0.28);
+  --nen-texto-contraste: #ffffff;
+}
+
+/* Aplicação suave das cores da categoria selecionada sobre a estética existente */
+html[data-nen-categoria] .topo {
+  border-bottom-color: var(--nen-borda);
+}
+
+html[data-nen-categoria] .secao-ativa-indicador {
+  border-color: var(--nen-borda);
+  background: linear-gradient(135deg, var(--nen-fundo-suave) 0%, rgba(13, 92, 117, 0.24) 100%);
+}
+
+html[data-nen-categoria] .secao-ativa-indicador strong,
+html[data-nen-categoria] .subtitulo-nen,
+html[data-nen-categoria] .nota-nen {
+  color: var(--nen-destaque);
+}
+
+html[data-nen-categoria] .titulo-secao {
+  color: var(--nen-destaque);
+  border-bottom-color: var(--nen-borda);
+}
+
+html[data-nen-categoria] .aba-btn-ativa {
+  background: linear-gradient(135deg, var(--nen-primaria) 0%, var(--nen-secundaria) 100%);
+  border-color: var(--nen-destaque);
+  color: var(--nen-texto-contraste);
+}
+
+html[data-nen-categoria] .card-header.azul {
+  background: linear-gradient(135deg, var(--nen-secundaria) 0%, var(--nen-primaria) 100%);
+  color: var(--nen-texto-contraste);
+}
+
+html[data-nen-categoria] .card-header.roxo,
+html[data-nen-categoria] .card-header.roxo-escuro,
+html[data-nen-categoria] .card-header.roxo-vivo {
+  background: linear-gradient(135deg, var(--nen-primaria) 0%, var(--nen-secundaria) 100%);
+  color: var(--nen-texto-contraste);
+}
+
+html[data-nen-categoria] .tabela-ficha th {
+  background: linear-gradient(180deg, var(--nen-primaria) 0%, var(--nen-secundaria) 100%);
+  color: var(--nen-texto-contraste);
+}
+
+html[data-nen-categoria] .pericia-nome {
+  background-color: var(--nen-fundo-suave);
+  color: var(--nen-destaque);
+}
+
+html[data-nen-categoria] .attr-tag {
+  background-color: var(--nen-secundaria);
+  color: var(--nen-texto-contraste);
+}
+
+html[data-nen-categoria] .attr-box {
+  background: linear-gradient(180deg, var(--nen-primaria) 0%, var(--nen-secundaria) 100%);
+  border-color: var(--nen-borda);
+}
+
+html[data-nen-categoria] .attr-box label {
+  color: var(--nen-texto-contraste);
+}
+
+html[data-nen-categoria] .destaque-num {
+  border-color: var(--nen-borda);
+  box-shadow: inset 0 0 0 1px var(--nen-fundo-suave);
+}
+
+html[data-nen-categoria] .card {
+  border-color: var(--nen-borda);
+}
+
+html[data-nen-categoria] .tabela-nen tbody tr.nen-linha-ativa td {
+  background-color: var(--nen-fundo-suave);
+  color: var(--nen-destaque);
+  border-top: 1px solid var(--nen-borda);
+  border-bottom: 1px solid var(--nen-borda);
 }
 
 * {
