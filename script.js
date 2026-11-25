@@ -708,22 +708,25 @@ function hasValidFirebaseConfig(cfg) {
 }
 
 function mapFirebaseAuthError(err) {
-  const code = err && typeof err.code === "string" ? err.code : "";
+  const code = err && typeof err.code === "string" ? err.code : "sem-codigo";
+  const rawMsg = err && typeof err.message === "string" ? err.message : String(err || "");
+  const detalheTecnico = `[${code}]: ${rawMsg}`;
+
   switch (code) {
     case "auth/invalid-email":
-      return "Formato de e-mail inválido.";
+      return `Formato de e-mail inválido ${detalheTecnico}`;
     case "auth/user-not-found":
     case "auth/wrong-password":
     case "auth/invalid-credential":
-      return "E-mail ou senha incorretos.";
+      return `E-mail ou senha incorretos ${detalheTecnico}`;
     case "auth/email-already-in-use":
-      return "Este e-mail já está cadastrado. Alterne para Entrar.";
+      return `Este e-mail já está cadastrado. Alterne para Entrar ${detalheTecnico}`;
     case "auth/weak-password":
-      return "Escolha uma senha mais forte (mínimo de 6 caracteres).";
+      return `Escolha uma senha mais forte (mínimo de 6 caracteres) ${detalheTecnico}`;
     case "auth/too-many-requests":
-      return "Muitas tentativas seguidas. Aguarde alguns instantes e tente novamente.";
+      return `Muitas tentativas seguidas. Aguarde alguns instantes e tente novamente ${detalheTecnico}`;
     default:
-      return "Não foi possível autenticar. Confira e-mail, senha e o método E-mail/Senha no Firebase.";
+      return `Não foi possível autenticar ${detalheTecnico}`;
   }
 }
 
@@ -769,8 +772,12 @@ async function initFirebase() {
         setStatusBanner("Faça login para salvar e carregar sua ficha no Firebase.", "info");
       }
     });
-  } catch {
-    setEntradaStatus("Sem conexão com o Firebase no momento. Você pode entrar offline/local.");
+  } catch (err) {
+    const code = err && typeof err.code === "string" ? err.code : "init-error";
+    const msg = err && typeof err.message === "string" ? err.message : String(err || "");
+    setEntradaStatus(
+      `Falha ao iniciar Firebase [${code}]: ${msg}. Você pode entrar offline/local.`
+    );
   }
 }
 
@@ -795,8 +802,10 @@ async function loadFromFirestore(uid) {
       saveLocalData(initialData);
       setStatusBanner("Nova ficha criada na sua conta do Firebase.", "success");
     }
-  } catch {
-    setStatusBanner("Erro ao ler dados do Firebase. Verifique as regras do Firestore.", "error");
+  } catch (err) {
+    const code = err && typeof err.code === "string" ? err.code : "firestore-read";
+    const msg = err && typeof err.message === "string" ? err.message : String(err || "");
+    setStatusBanner(`Erro ao ler Firebase [${code}]: ${msg}`, "error");
   }
 }
 
@@ -871,6 +880,7 @@ async function handleAuthSubmit(event) {
     }
     clearAuthSensitiveInputs();
   } catch (err) {
+    console.error("Erro de autenticação Firebase:", err);
     setEntradaStatus(mapFirebaseAuthError(err));
   }
 }
