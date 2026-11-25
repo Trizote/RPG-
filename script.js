@@ -3,9 +3,9 @@
    Segurança front-end (XSS, Prototype Pollution, validação de faixa/tipo,
    anti-spam de escrita, higiene de sessão, isTrusted guard e console guard)
    + Firebase Authentication & Cloud Firestore + Sessão Offline/Local temporária
-   + Modo Administrador por UID + Mensagem temporária por UID (minutos até 24h)
-   + Somente leitura, bloqueio de auto-save na inspeção, UIDs recentes,
-     ajuste rápido e prévia do recado ativo
+   + Modo Administrador por UID + Chat de Comandos + Prompt Completo de Admin
+   + Mensagem temporária (Normal/Urgente até 24h), Somente Leitura, UIDs Recentes,
+     Ajuste Rápido, Exportar/Importar JSON, Diff de Alterações, Modelos Base e Log
    + Exclusão de ficha e exclusão de conta
    + Sincronização precisa das seções no topo conforme a rolagem
    + Cores dinâmicas conforme a Categoria Principal de Afinidade de Nen
@@ -38,6 +38,8 @@ const ADMIN_NOTICE_FIELD_KEY = "id:admin_recado_payload";
 const MAX_NOTICE_HOURS = 24;
 const MAX_NOTICE_MINUTES = MAX_NOTICE_HOURS * 60;
 const MAX_RECENT_UIDS = 6;
+const MAX_ADMIN_LOGS = 25;
+
 const NOTICE_DURATION_PRESETS = Object.freeze([
   { minutes: 15, label: "15 minutos" },
   { minutes: 30, label: "30 minutos" },
@@ -46,6 +48,57 @@ const NOTICE_DURATION_PRESETS = Object.freeze([
   { minutes: 720, label: "12 horas" },
   { minutes: 1440, label: "24 horas (máx.)" }
 ]);
+
+const SHEET_TEMPLATES = Object.freeze({
+  iniciante: Object.freeze({
+    label: "Agente Iniciante (Nv 1 / Rank E)",
+    fields: Object.freeze({
+      "id:nv-val": "1",
+      "id:rank-val": "E",
+      "id:espacos-max": "5",
+      "id:attr-agi": "1",
+      "id:attr-for": "1",
+      "id:attr-ca": "1",
+      "id:attr-int": "1",
+      "id:attr-vig": "1",
+      "id:def-total": "11",
+      "id:def-esquiva": "11",
+      "id:def-deslocamento": "9"
+    })
+  }),
+  veterano: Object.freeze({
+    label: "Agente Veterano (Nv 10 / Rank C)",
+    fields: Object.freeze({
+      "id:nv-val": "10",
+      "id:rank-val": "C",
+      "id:espacos-max": "10",
+      "id:attr-agi": "3",
+      "id:attr-for": "2",
+      "id:attr-ca": "3",
+      "id:attr-int": "2",
+      "id:attr-vig": "3",
+      "id:def-total": "14",
+      "id:def-esquiva": "14",
+      "id:def-deslocamento": "10"
+    })
+  }),
+  elite: Object.freeze({
+    label: "Agente Elite / NPC Chefe (Nv 25 / Rank A)",
+    fields: Object.freeze({
+      "id:nv-val": "25",
+      "id:rank-val": "A",
+      "id:espacos-max": "18",
+      "id:attr-agi": "5",
+      "id:attr-for": "4",
+      "id:attr-ca": "6",
+      "id:attr-int": "4",
+      "id:attr-vig": "5",
+      "id:def-total": "18",
+      "id:def-esquiva": "18",
+      "id:def-deslocamento": "12"
+    })
+  })
+});
 
 const FORBIDDEN_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 const FIRESTORE_COLLECTION = "fichas_ordem_arkan";
@@ -122,10 +175,14 @@ const state = {
   isSaving: false,
   isDeleting: false,
   lastSavedSnapshot: "",
+  baselineFields: createSafeRecord(),
   lastCloudWriteAt: 0,
   adminTargetUid: "",
   adminRecentUids: [],
   adminReadOnly: false,
+  adminLogs: [],
+  adminChatHistory: [],
+  adminModalOpen: false,
   activeNotice: null,
   noticeExpiryTimer: null
 };
@@ -238,12 +295,16 @@ function initConsoleSecurityGuard() {
 }
 
 /* --------------------------------------------------------------------------
-   Mensagens Temporárias do Admin por UID (Minutos até Limite Máximo de 24h)
+   Mensagens Temporárias do Admin por UID (Normal/Urgente até 24h)
    -------------------------------------------------------------------------- */
 function normalizeNoticeMinutes(rawMinutes) {
   const num = Number(rawMinutes);
   if (!Number.isFinite(num) || num <= 0) return MAX_NOTICE_MINUTES;
   return Math.min(MAX_NOTICE_MINUTES, Math.max(1, Math.trunc(num)));
+}
+
+function normalizeNoticePriority(rawPriority) {
+  return rawPriority === "urgent" ? "urgent" : "normal";
 }
 
 function formatDurationLabel(minutes) {
@@ -263,11 +324,12 @@ function formatRemainingTimeLabel(expiresAtMs) {
   return `restam ~${formatDurationLabel(totalMin)}`;
 }
 
-function buildEncodedNoticePayload(messageText, minutesValue) {
+function buildEncodedNoticePayload(messageText, minutesValue, priorityValue = "normal") {
   const cleanText = sanitizeText(String(messageText ?? ""), 600).trim();
   if (!cleanText) return "";
 
   const minutes = normalizeNoticeMinutes(minutesValue);
+  const priority = normalizeNoticePriority(priorityValue);
   const nowMs = Date.now();
   const maxAllowedExpiryMs = nowMs + MAX_NOTICE_MINUTES * 60 * 1000;
   const requestedExpiryMs = nowMs + minutes * 60 * 1000;
@@ -277,6 +339,7 @@ function buildEncodedNoticePayload(messageText, minutesValue) {
     msg: cleanText,
     minutes,
     hours: Number((minutes / 60).toFixed(2)),
+    priority,
     sentAt: nowMs,
     expiresAt: expiresAtMs
   });
@@ -301,6 +364,7 @@ function parseActiveNoticeFromFields(fieldsObj) {
         ? parsed.minutes
         : Number(parsed.hours) * 60;
     const minutes = normalizeNoticeMinutes(rawMin);
+    const priority = normalizeNoticePriority(parsed.priority);
 
     if (!cleanMsg || !Number.isFinite(expiresAt)) return null;
 
@@ -315,6 +379,7 @@ function parseActiveNoticeFromFields(fieldsObj) {
     return {
       msg: cleanMsg,
       minutes,
+      priority,
       expiresAt: effectiveExpiryMs
     };
   } catch {
@@ -361,6 +426,14 @@ function renderPlayerNoticeBanner() {
   const activeBanner = document.getElementById("player-admin-notice-banner");
   if (!activeBanner) return;
 
+  const isUrgent = state.activeNotice.priority === "urgent";
+  activeBanner.style.border = isUrgent
+    ? "1px solid rgba(255, 99, 99, 0.85)"
+    : "1px solid rgba(255, 217, 102, 0.55)";
+  activeBanner.style.background = isUrgent
+    ? "rgba(62, 22, 28, 0.96)"
+    : "rgba(34, 42, 54, 0.96)";
+
   const expDate = new Date(state.activeNotice.expiresAt);
   const expFormatted = expDate.toLocaleString("pt-BR", {
     day: "2-digit",
@@ -375,8 +448,12 @@ function renderPlayerNoticeBanner() {
   header.style.cssText = "display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; margin-bottom: 6px;";
 
   const title = document.createElement("strong");
-  title.textContent = "Recado do Administrador";
-  title.style.cssText = "color: #ffe082; font-size: 13px;";
+  title.textContent = isUrgent
+    ? "AVISO URGENTE DO ADMINISTRADOR"
+    : "Recado do Administrador";
+  title.style.cssText = isUrgent
+    ? "color: #ff8a80; font-size: 13px; letter-spacing: 0.4px;"
+    : "color: #ffe082; font-size: 13px;";
 
   const meta = document.createElement("span");
   meta.textContent = `Duração: ${formatDurationLabel(state.activeNotice.minutes)} (${formatRemainingTimeLabel(state.activeNotice.expiresAt)} · expira em ${expFormatted})`;
@@ -426,7 +503,7 @@ function ensurePlayerNoticeBannerElement() {
 }
 
 /* --------------------------------------------------------------------------
-   Helpers de Modo Administrador por UID e Ferramentas Extras
+   Helpers de Modo Administrador, Log, Diff, JSON, Templates, Chat e Modal
    -------------------------------------------------------------------------- */
 function isCurrentUserAdmin() {
   return Boolean(state.user && typeof state.user.uid === "string" && state.user.uid === ADMIN_UID);
@@ -439,6 +516,111 @@ function isInspectionReadOnlyActive() {
 function sanitizeTargetUid(rawUid) {
   const clean = sanitizeSingleLine(String(rawUid ?? ""), 128);
   return UID_REGEX.test(clean) ? clean : "";
+}
+
+function appendAdminLog(actionText) {
+  if (!isCurrentUserAdmin()) return;
+  const clean = sanitizeSingleLine(actionText, 180);
+  if (!clean) return;
+  const timeStr = new Date().toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+  state.adminLogs = [`[${timeStr}] ${clean}`, ...state.adminLogs].slice(0, MAX_ADMIN_LOGS);
+  renderAdminLogsUI();
+}
+
+function appendAdminChatMessage(sender, text) {
+  const cleanSender = sender === "admin" ? "Você" : "Sistema";
+  const cleanText = sanitizeText(String(text ?? ""), 600).trim();
+  if (!cleanText) return;
+  state.adminChatHistory = [...state.adminChatHistory, { sender: cleanSender, text: cleanText }].slice(-20);
+  renderAdminChatHistoryUI();
+}
+
+function renderAdminChatHistoryUI() {
+  const logBox = document.getElementById("admin-chat-history");
+  if (!logBox) return;
+
+  logBox.innerHTML = "";
+  if (!state.adminChatHistory.length) {
+    const empty = document.createElement("div");
+    empty.textContent = "Digite /admin ou /painel para abrir o prompt completo, ou /ajuda para ver comandos.";
+    empty.style.cssText = "font-size: 12px; color: #9fb0c0;";
+    logBox.appendChild(empty);
+    return;
+  }
+
+  state.adminChatHistory.forEach((entry) => {
+    const line = document.createElement("div");
+    line.style.cssText = "font-size: 12px; line-height: 1.4; white-space: pre-wrap; word-break: break-word;";
+    const prefix = document.createElement("strong");
+    prefix.textContent = `${entry.sender}: `;
+    prefix.style.color = entry.sender === "Você" ? "#7ee2b8" : "#ffd966";
+    const msg = document.createElement("span");
+    msg.textContent = entry.text;
+    msg.style.color = "#e6edf3";
+    line.appendChild(prefix);
+    line.appendChild(msg);
+    logBox.appendChild(line);
+  });
+
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+function renderAdminLogsUI() {
+  const listEl = document.getElementById("admin-session-log-list");
+  if (!listEl) return;
+
+  listEl.innerHTML = "";
+  if (!state.adminLogs.length) {
+    const empty = document.createElement("li");
+    empty.textContent = "Nenhuma ação registrada nesta sessão.";
+    empty.style.color = "#9fb0c0";
+    listEl.appendChild(empty);
+    return;
+  }
+
+  state.adminLogs.forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = item;
+    li.style.marginBottom = "4px";
+    listEl.appendChild(li);
+  });
+}
+
+function captureBaselineFields(fieldsObj) {
+  const copy = createSafeRecord();
+  if (!fieldsObj || typeof fieldsObj !== "object") {
+    state.baselineFields = copy;
+    return;
+  }
+  Object.entries(fieldsObj).forEach(([k, v]) => {
+    if (isValidFieldKey(k)) {
+      copy[k] = v;
+    }
+  });
+  state.baselineFields = copy;
+}
+
+function computeSheetDiffList() {
+  const current = collectSheetData().fields;
+  const baseline = state.baselineFields || createSafeRecord();
+  const allKeys = Array.from(new Set([...Object.keys(baseline), ...Object.keys(current)])).sort();
+  const changes = [];
+
+  for (let i = 0; i < allKeys.length; i += 1) {
+    const key = allKeys[i];
+    if (!isValidFieldKey(key) || key === ADMIN_NOTICE_FIELD_KEY) continue;
+    const oldVal = Object.prototype.hasOwnProperty.call(baseline, key) ? baseline[key] : "";
+    const newVal = Object.prototype.hasOwnProperty.call(current, key) ? current[key] : "";
+    if (String(oldVal) !== String(newVal)) {
+      const label = key.startsWith("id:") ? key.slice(3) : key;
+      changes.push(`${label}: "${String(oldVal)}" → "${String(newVal)}"`);
+    }
+  }
+  return changes;
 }
 
 function saveAdminTargetUidToStorage(uid) {
@@ -542,7 +724,8 @@ function updateAdminNoticePreviewUI() {
     return;
   }
 
-  previewEl.textContent = `Recado ativo no alvo (${formatRemainingTimeLabel(state.activeNotice.expiresAt)}): "${state.activeNotice.msg}"`;
+  const tag = state.activeNotice.priority === "urgent" ? "[URGENTE]" : "[Normal]";
+  previewEl.textContent = `Recado ativo no alvo ${tag} (${formatRemainingTimeLabel(state.activeNotice.expiresAt)}): "${state.activeNotice.msg}"`;
 }
 
 function updateAdminRecentUidsUI() {
@@ -591,17 +774,41 @@ function updateAdminRecentUidsUI() {
   });
 }
 
+function setAdminModalVisibility(shouldOpen) {
+  if (!isCurrentUserAdmin()) {
+    state.adminModalOpen = false;
+    const modal = document.getElementById("admin-prompt-modal");
+    if (modal) modal.hidden = true;
+    return;
+  }
+  ensureAdminPromptModalElement();
+  state.adminModalOpen = Boolean(shouldOpen);
+  const modal = document.getElementById("admin-prompt-modal");
+  if (modal) {
+    modal.hidden = !state.adminModalOpen;
+    if (state.adminModalOpen) {
+      updateAdminBarUI();
+      renderAdminLogsUI();
+    }
+  }
+}
+
 function updateAdminBarUI() {
   const bar = document.getElementById("admin-uid-bar");
 
   if (!isCurrentUserAdmin()) {
     state.adminReadOnly = false;
+    state.adminModalOpen = false;
     applySheetReadOnlyState();
     if (bar) bar.hidden = true;
+    const modal = document.getElementById("admin-prompt-modal");
+    if (modal) modal.hidden = true;
     return;
   }
 
   ensureAdminBarElement();
+  ensureAdminPromptModalElement();
+
   const activeBar = document.getElementById("admin-uid-bar");
   const activeInput = document.getElementById("admin-target-uid-input");
   const activeBadge = document.getElementById("admin-target-status");
@@ -612,7 +819,7 @@ function updateAdminBarUI() {
     activeInput.value = state.adminTargetUid || "";
   }
   if (activeBadge) {
-    const modeLabel = state.adminReadOnly ? " · SOMENTE LEITURA (auto-save pausado)" : " · Edição ativa";
+    const modeLabel = state.adminReadOnly ? " · SOMENTE LEITURA" : " · Edição ativa";
     if (state.adminTargetUid && state.adminTargetUid !== state.user.uid) {
       activeBadge.textContent = `Alvo: ${state.adminTargetUid}${modeLabel}`;
     } else {
@@ -630,6 +837,8 @@ function updateAdminBarUI() {
   updateAdminRecentUidsUI();
   updateAdminNoticePreviewUI();
   syncAdminQuickInputsFromSheet();
+  renderAdminChatHistoryUI();
+  renderAdminLogsUI();
 }
 
 function ensureAdminBarElement() {
@@ -642,34 +851,183 @@ function ensureAdminBarElement() {
   const bar = document.createElement("section");
   bar.id = "admin-uid-bar";
   bar.hidden = true;
-  bar.setAttribute("aria-label", "Painel de Administrador por UID");
+  bar.setAttribute("aria-label", "Chat e Barra de Comando do Administrador");
   bar.style.cssText = [
     "margin: 10px auto 12px",
     "padding: 12px 14px",
     "max-width: 1120px",
     "border-radius: 10px",
     "border: 1px solid rgba(255, 217, 102, 0.45)",
-    "background: rgba(20, 28, 36, 0.94)",
+    "background: rgba(18, 24, 32, 0.96)",
     "color: #f2f4f8",
     "display: flex",
     "flex-direction: column",
-    "gap: 10px"
+    "gap: 8px"
   ].join(";");
 
   const topRow = document.createElement("div");
   topRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;";
 
   const title = document.createElement("strong");
-  title.textContent = "Modo Admin (UID, Mensagem até 24h e Controles)";
+  title.textContent = "Console / Chat do Admin (Ordem de Arkan)";
   title.style.cssText = "color: #ffd966; font-size: 13px;";
+
+  const rightHeader = document.createElement("div");
+  rightHeader.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
 
   const statusSpan = document.createElement("span");
   statusSpan.id = "admin-target-status";
   statusSpan.style.cssText = "font-size: 12px; color: #b8c2cc; word-break: break-all;";
 
-  topRow.appendChild(title);
-  topRow.appendChild(statusSpan);
+  const openModalBtn = document.createElement("button");
+  openModalBtn.type = "button";
+  openModalBtn.id = "admin-open-prompt-btn";
+  openModalBtn.textContent = "Abrir Painel Admin";
+  openModalBtn.style.cssText = [
+    "padding: 6px 11px",
+    "border-radius: 8px",
+    "border: none",
+    "background: #ffd966",
+    "color: #141920",
+    "font-weight: 700",
+    "font-size: 12px",
+    "cursor: pointer"
+  ].join(";");
 
+  rightHeader.appendChild(statusSpan);
+  rightHeader.appendChild(openModalBtn);
+  topRow.appendChild(title);
+  topRow.appendChild(rightHeader);
+
+  const chatHistory = document.createElement("div");
+  chatHistory.id = "admin-chat-history";
+  chatHistory.style.cssText = [
+    "max-height: 92px",
+    "overflow-y: auto",
+    "padding: 8px 10px",
+    "border-radius: 8px",
+    "background: rgba(9, 13, 18, 0.88)",
+    "border: 1px solid rgba(255,255,255,0.12)",
+    "display: flex",
+    "flex-direction: column",
+    "gap: 4px"
+  ].join(";");
+
+  const chatForm = document.createElement("form");
+  chatForm.id = "admin-chat-command-form";
+  chatForm.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+  const chatInput = document.createElement("input");
+  chatInput.type = "text";
+  chatInput.id = "admin-chat-command-input";
+  chatInput.placeholder = "Digite um comando (ex: /admin, /ajuda, /uid <UID>, /recado 30 Mensagem)...";
+  chatInput.autocomplete = "off";
+  chatInput.spellcheck = false;
+  chatInput.setAttribute("aria-label", "Comando do administrador");
+  chatInput.style.cssText = [
+    "flex: 1 1 220px",
+    "min-width: 170px",
+    "padding: 8px 10px",
+    "border-radius: 8px",
+    "border: 1px solid rgba(255,217,102,0.35)",
+    "background: rgba(10,14,18,0.92)",
+    "color: #fff",
+    "font-size: 13px"
+  ].join(";");
+
+  const chatSendBtn = document.createElement("button");
+  chatSendBtn.type = "submit";
+  chatSendBtn.textContent = "Executar";
+  chatSendBtn.style.cssText = [
+    "padding: 8px 14px",
+    "border-radius: 8px",
+    "border: none",
+    "background: #2b8a6e",
+    "color: #fff",
+    "font-weight: 700",
+    "font-size: 13px",
+    "cursor: pointer"
+  ].join(";");
+
+  chatForm.appendChild(chatInput);
+  chatForm.appendChild(chatSendBtn);
+
+  bar.appendChild(topRow);
+  bar.appendChild(chatHistory);
+  bar.appendChild(chatForm);
+
+  if (mainEl && mainEl.parentNode === anchorParent) {
+    anchorParent.insertBefore(bar, mainEl);
+  } else {
+    anchorParent.appendChild(bar);
+  }
+
+  openModalBtn.addEventListener("click", () => setAdminModalVisibility(true));
+  chatForm.addEventListener("submit", handleAdminChatCommandSubmit);
+}
+
+function ensureAdminPromptModalElement() {
+  if (document.getElementById("admin-prompt-modal")) return;
+
+  const overlay = document.createElement("div");
+  overlay.id = "admin-prompt-modal";
+  overlay.hidden = true;
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", "Prompt Completo de Funções do Administrador");
+  overlay.style.cssText = [
+    "position: fixed",
+    "inset: 0",
+    "z-index: 9999",
+    "background: rgba(5, 8, 12, 0.82)",
+    "display: flex",
+    "align-items: center",
+    "justify-content: center",
+    "padding: 12px",
+    "overflow-y: auto"
+  ].join(";");
+
+  const card = document.createElement("div");
+  card.style.cssText = [
+    "width: 100%",
+    "max-width: 760px",
+    "max-height: 90vh",
+    "overflow-y: auto",
+    "border-radius: 12px",
+    "border: 1px solid rgba(255, 217, 102, 0.55)",
+    "background: #141c24",
+    "color: #f2f4f8",
+    "padding: 16px",
+    "display: flex",
+    "flex-direction: column",
+    "gap: 12px",
+    "box-shadow: 0 18px 48px rgba(0,0,0,0.65)"
+  ].join(";");
+
+  const modalHeader = document.createElement("div");
+  modalHeader.style.cssText = "display: flex; justify-content: space-between; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.12); padding-bottom: 8px;";
+
+  const modalTitle = document.createElement("strong");
+  modalTitle.textContent = "Central Completa do Administrador (UID)";
+  modalTitle.style.cssText = "color: #ffd966; font-size: 15px;";
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.textContent = "Fechar ✕";
+  closeBtn.style.cssText = [
+    "padding: 6px 10px",
+    "border-radius: 8px",
+    "border: 1px solid rgba(255,255,255,0.25)",
+    "background: transparent",
+    "color: #fff",
+    "font-size: 12px",
+    "cursor: pointer"
+  ].join(";");
+
+  modalHeader.appendChild(modalTitle);
+  modalHeader.appendChild(closeBtn);
+
+  // 1. Seleção de UID e Somente Leitura
   const uidRow = document.createElement("div");
   uidRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
 
@@ -679,14 +1037,13 @@ function ensureAdminBarElement() {
   input.placeholder = "Cole o UID do jogador...";
   input.autocomplete = "off";
   input.spellcheck = false;
-  input.setAttribute("aria-label", "UID do usuário alvo");
   input.style.cssText = [
-    "flex: 1 1 190px",
+    "flex: 1 1 200px",
     "min-width: 150px",
     "padding: 8px 10px",
     "border-radius: 8px",
     "border: 1px solid rgba(255,255,255,0.22)",
-    "background: rgba(10,14,18,0.85)",
+    "background: #0a0e12",
     "color: #fff",
     "font-size: 13px"
   ].join(";");
@@ -695,44 +1052,19 @@ function ensureAdminBarElement() {
   loadBtn.type = "button";
   loadBtn.id = "admin-load-uid-btn";
   loadBtn.textContent = "Carregar UID";
-  loadBtn.style.cssText = [
-    "padding: 8px 12px",
-    "border-radius: 8px",
-    "border: none",
-    "background: #2b8a6e",
-    "color: #fff",
-    "font-weight: 600",
-    "font-size: 13px",
-    "cursor: pointer"
-  ].join(";");
+  loadBtn.style.cssText = "padding: 8px 12px; border-radius: 8px; border: none; background: #2b8a6e; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
 
   const selfBtn = document.createElement("button");
   selfBtn.type = "button";
   selfBtn.id = "admin-self-uid-btn";
   selfBtn.textContent = "Minha ficha";
-  selfBtn.style.cssText = [
-    "padding: 8px 12px",
-    "border-radius: 8px",
-    "border: 1px solid rgba(255,255,255,0.25)",
-    "background: transparent",
-    "color: #e4e4ec",
-    "font-size: 13px",
-    "cursor: pointer"
-  ].join(";");
+  selfBtn.style.cssText = "padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #e4e4ec; font-size: 12px; cursor: pointer;";
 
   const readOnlyBtn = document.createElement("button");
   readOnlyBtn.type = "button";
   readOnlyBtn.id = "admin-toggle-readonly-btn";
   readOnlyBtn.textContent = "Somente leitura: OFF";
-  readOnlyBtn.style.cssText = [
-    "padding: 8px 12px",
-    "border-radius: 8px",
-    "border: 1px solid rgba(255,255,255,0.25)",
-    "background: transparent",
-    "color: #e4e4ec",
-    "font-size: 13px",
-    "cursor: pointer"
-  ].join(";");
+  readOnlyBtn.style.cssText = "padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #e4e4ec; font-size: 12px; cursor: pointer;";
 
   uidRow.appendChild(input);
   uidRow.appendChild(loadBtn);
@@ -744,93 +1076,13 @@ function ensureAdminBarElement() {
   recentBox.hidden = true;
   recentBox.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px; align-items: center;";
 
-  const quickRow = document.createElement("div");
-  quickRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+  // 2. Mensagem temporária (Normal / Urgente até 24h)
+  const msgSection = document.createElement("div");
+  msgSection.style.cssText = "padding: 10px; border-radius: 8px; background: rgba(10,14,18,0.65); border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 8px;";
 
-  const nvLabel = document.createElement("label");
-  nvLabel.htmlFor = "admin-quick-nv";
-  nvLabel.textContent = "Nível:";
-  nvLabel.style.cssText = "font-size: 12px; color: #d6dee6;";
-
-  const nvInput = document.createElement("input");
-  nvInput.type = "number";
-  nvInput.id = "admin-quick-nv";
-  nvInput.min = "1";
-  nvInput.max = "99";
-  nvInput.style.cssText = [
-    "width: 68px",
-    "padding: 6px 8px",
-    "border-radius: 8px",
-    "border: 1px solid rgba(255,255,255,0.22)",
-    "background: rgba(10,14,18,0.85)",
-    "color: #fff",
-    "font-size: 13px"
-  ].join(";");
-
-  const rankLabel = document.createElement("label");
-  rankLabel.htmlFor = "admin-quick-rank";
-  rankLabel.textContent = "Rank:";
-  rankLabel.style.cssText = "font-size: 12px; color: #d6dee6;";
-
-  const rankSelect = document.createElement("select");
-  rankSelect.id = "admin-quick-rank";
-  rankSelect.style.cssText = [
-    "padding: 6px 8px",
-    "border-radius: 8px",
-    "border: 1px solid rgba(255,255,255,0.22)",
-    "background: rgba(10,14,18,0.92)",
-    "color: #fff",
-    "font-size: 13px"
-  ].join(";");
-  ALLOWED_RANKS.forEach((rk) => {
-    const opt = document.createElement("option");
-    opt.value = rk;
-    opt.textContent = rk;
-    rankSelect.appendChild(opt);
-  });
-
-  const slotsLabel = document.createElement("label");
-  slotsLabel.htmlFor = "admin-quick-slots";
-  slotsLabel.textContent = "Espaços máx.:";
-  slotsLabel.style.cssText = "font-size: 12px; color: #d6dee6;";
-
-  const slotsInput = document.createElement("input");
-  slotsInput.type = "number";
-  slotsInput.id = "admin-quick-slots";
-  slotsInput.min = "0";
-  slotsInput.max = "200";
-  slotsInput.style.cssText = [
-    "width: 76px",
-    "padding: 6px 8px",
-    "border-radius: 8px",
-    "border: 1px solid rgba(255,255,255,0.22)",
-    "background: rgba(10,14,18,0.85)",
-    "color: #fff",
-    "font-size: 13px"
-  ].join(";");
-
-  const applyQuickBtn = document.createElement("button");
-  applyQuickBtn.type = "button";
-  applyQuickBtn.id = "admin-apply-quick-btn";
-  applyQuickBtn.textContent = "Aplicar e salvar";
-  applyQuickBtn.style.cssText = [
-    "padding: 7px 11px",
-    "border-radius: 8px",
-    "border: none",
-    "background: #356899",
-    "color: #fff",
-    "font-weight: 600",
-    "font-size: 12px",
-    "cursor: pointer"
-  ].join(";");
-
-  quickRow.appendChild(nvLabel);
-  quickRow.appendChild(nvInput);
-  quickRow.appendChild(rankLabel);
-  quickRow.appendChild(rankSelect);
-  quickRow.appendChild(slotsLabel);
-  quickRow.appendChild(slotsInput);
-  quickRow.appendChild(applyQuickBtn);
+  const msgTitle = document.createElement("strong");
+  msgTitle.textContent = "Recado Temporário para o UID (até 24h)";
+  msgTitle.style.cssText = "font-size: 12px; color: #ffd966;";
 
   const msgRow = document.createElement("div");
   msgRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch;";
@@ -839,33 +1091,25 @@ function ensureAdminBarElement() {
   msgInput.type = "text";
   msgInput.id = "admin-notice-text-input";
   msgInput.maxLength = 600;
-  msgInput.placeholder = "Escreva a mensagem para o UID selecionado...";
-  msgInput.autocomplete = "off";
-  msgInput.setAttribute("aria-label", "Mensagem para o jogador");
-  msgInput.style.cssText = [
-    "flex: 1 1 220px",
-    "min-width: 170px",
-    "padding: 8px 10px",
-    "border-radius: 8px",
-    "border: 1px solid rgba(255,255,255,0.22)",
-    "background: rgba(10,14,18,0.85)",
-    "color: #fff",
-    "font-size: 13px"
-  ].join(";");
+  msgInput.placeholder = "Mensagem para o jogador...";
+  msgInput.style.cssText = "flex: 1 1 200px; min-width: 160px; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 13px;";
+
+  const prioritySelect = document.createElement("select");
+  prioritySelect.id = "admin-notice-priority-select";
+  prioritySelect.style.cssText = "padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+  [
+    { value: "normal", label: "Prioridade: Normal" },
+    { value: "urgent", label: "Prioridade: URGENTE" }
+  ].forEach((p) => {
+    const opt = document.createElement("option");
+    opt.value = p.value;
+    opt.textContent = p.label;
+    prioritySelect.appendChild(opt);
+  });
 
   const durationSelect = document.createElement("select");
   durationSelect.id = "admin-notice-duration-select";
-  durationSelect.setAttribute("aria-label", "Tempo de exibição da mensagem em minutos (até 24h)");
-  durationSelect.style.cssText = [
-    "padding: 8px 10px",
-    "border-radius: 8px",
-    "border: 1px solid rgba(255,255,255,0.22)",
-    "background: rgba(10,14,18,0.92)",
-    "color: #ffd966",
-    "font-size: 13px",
-    "font-weight: 600"
-  ].join(";");
-
+  durationSelect.style.cssText = "padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #ffd966; font-size: 12px; font-weight: 600;";
   NOTICE_DURATION_PRESETS.forEach((opt) => {
     const optionEl = document.createElement("option");
     optionEl.value = String(opt.minutes);
@@ -878,32 +1122,16 @@ function ensureAdminBarElement() {
   sendNoticeBtn.type = "button";
   sendNoticeBtn.id = "admin-send-notice-btn";
   sendNoticeBtn.textContent = "Enviar recado";
-  sendNoticeBtn.style.cssText = [
-    "padding: 8px 12px",
-    "border-radius: 8px",
-    "border: none",
-    "background: #c48b1b",
-    "color: #111",
-    "font-weight: 700",
-    "font-size: 13px",
-    "cursor: pointer"
-  ].join(";");
+  sendNoticeBtn.style.cssText = "padding: 8px 12px; border-radius: 8px; border: none; background: #c48b1b; color: #111; font-weight: 700; font-size: 12px; cursor: pointer;";
 
   const clearNoticeBtn = document.createElement("button");
   clearNoticeBtn.type = "button";
   clearNoticeBtn.id = "admin-clear-notice-btn";
   clearNoticeBtn.textContent = "Remover recado";
-  clearNoticeBtn.style.cssText = [
-    "padding: 8px 12px",
-    "border-radius: 8px",
-    "border: 1px solid rgba(255,255,255,0.25)",
-    "background: transparent",
-    "color: #e4e4ec",
-    "font-size: 13px",
-    "cursor: pointer"
-  ].join(";");
+  clearNoticeBtn.style.cssText = "padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #e4e4ec; font-size: 12px; cursor: pointer;";
 
   msgRow.appendChild(msgInput);
+  msgRow.appendChild(prioritySelect);
   msgRow.appendChild(durationSelect);
   msgRow.appendChild(sendNoticeBtn);
   msgRow.appendChild(clearNoticeBtn);
@@ -912,25 +1140,405 @@ function ensureAdminBarElement() {
   previewEl.id = "admin-notice-preview";
   previewEl.style.cssText = "font-size: 12px; color: #ffe082; word-break: break-word;";
 
-  bar.appendChild(topRow);
-  bar.appendChild(uidRow);
-  bar.appendChild(recentBox);
-  bar.appendChild(quickRow);
-  bar.appendChild(msgRow);
-  bar.appendChild(previewEl);
+  msgSection.appendChild(msgTitle);
+  msgSection.appendChild(msgRow);
+  msgSection.appendChild(previewEl);
 
-  if (mainEl && mainEl.parentNode === anchorParent) {
-    anchorParent.insertBefore(bar, mainEl);
-  } else {
-    anchorParent.appendChild(bar);
-  }
+  // 3. Ajuste rápido + Clonar ficha base (Templates)
+  const quickSection = document.createElement("div");
+  quickSection.style.cssText = "padding: 10px; border-radius: 8px; background: rgba(10,14,18,0.65); border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 8px;";
+
+  const quickTitle = document.createElement("strong");
+  quickTitle.textContent = "Ajuste Rápido e Fichas Base (Modelos)";
+  quickTitle.style.cssText = "font-size: 12px; color: #ffd966;";
+
+  const quickRow = document.createElement("div");
+  quickRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+  const nvLabel = document.createElement("label");
+  nvLabel.htmlFor = "admin-quick-nv";
+  nvLabel.textContent = "Nível:";
+  nvLabel.style.fontSize = "12px";
+
+  const nvInput = document.createElement("input");
+  nvInput.type = "number";
+  nvInput.id = "admin-quick-nv";
+  nvInput.min = "1";
+  nvInput.max = "99";
+  nvInput.style.cssText = "width: 64px; padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+
+  const rankLabel = document.createElement("label");
+  rankLabel.htmlFor = "admin-quick-rank";
+  rankLabel.textContent = "Rank:";
+  rankLabel.style.fontSize = "12px";
+
+  const rankSelect = document.createElement("select");
+  rankSelect.id = "admin-quick-rank";
+  rankSelect.style.cssText = "padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+  ALLOWED_RANKS.forEach((rk) => {
+    const opt = document.createElement("option");
+    opt.value = rk;
+    opt.textContent = rk;
+    rankSelect.appendChild(opt);
+  });
+
+  const slotsLabel = document.createElement("label");
+  slotsLabel.htmlFor = "admin-quick-slots";
+  slotsLabel.textContent = "Espaços:";
+  slotsLabel.style.fontSize = "12px";
+
+  const slotsInput = document.createElement("input");
+  slotsInput.type = "number";
+  slotsInput.id = "admin-quick-slots";
+  slotsInput.min = "0";
+  slotsInput.max = "200";
+  slotsInput.style.cssText = "width: 68px; padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+
+  const applyQuickBtn = document.createElement("button");
+  applyQuickBtn.type = "button";
+  applyQuickBtn.textContent = "Aplicar e salvar";
+  applyQuickBtn.style.cssText = "padding: 7px 10px; border-radius: 8px; border: none; background: #356899; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+
+  quickRow.appendChild(nvLabel);
+  quickRow.appendChild(nvInput);
+  quickRow.appendChild(rankLabel);
+  quickRow.appendChild(rankSelect);
+  quickRow.appendChild(slotsLabel);
+  quickRow.appendChild(slotsInput);
+  quickRow.appendChild(applyQuickBtn);
+
+  const templateRow = document.createElement("div");
+  templateRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+  const templateSelect = document.createElement("select");
+  templateSelect.id = "admin-template-select";
+  templateSelect.style.cssText = "flex: 1 1 200px; padding: 7px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+  Object.entries(SHEET_TEMPLATES).forEach(([key, tpl]) => {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = tpl.label;
+    templateSelect.appendChild(opt);
+  });
+
+  const applyTemplateBtn = document.createElement("button");
+  applyTemplateBtn.type = "button";
+  applyTemplateBtn.textContent = "Clonar modelo na ficha";
+  applyTemplateBtn.style.cssText = "padding: 7px 11px; border-radius: 8px; border: none; background: #6b4c9a; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+
+  templateRow.appendChild(templateSelect);
+  templateRow.appendChild(applyTemplateBtn);
+
+  quickSection.appendChild(quickTitle);
+  quickSection.appendChild(quickRow);
+  quickSection.appendChild(templateRow);
+
+  // 4. Comparador (Diff) + Exportar / Importar JSON
+  const backupSection = document.createElement("div");
+  backupSection.style.cssText = "padding: 10px; border-radius: 8px; background: rgba(10,14,18,0.65); border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 8px;";
+
+  const backupTitle = document.createElement("strong");
+  backupTitle.textContent = "Comparar Alterações (Diff) e Backup JSON";
+  backupTitle.style.cssText = "font-size: 12px; color: #ffd966;";
+
+  const backupBtnRow = document.createElement("div");
+  backupBtnRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+  const diffBtn = document.createElement("button");
+  diffBtn.type = "button";
+  diffBtn.textContent = "Ver alterações (Diff)";
+  diffBtn.style.cssText = "padding: 7px 10px; border-radius: 8px; border: 1px solid rgba(255,217,102,0.4); background: transparent; color: #ffd966; font-size: 12px; cursor: pointer;";
+
+  const exportBtn = document.createElement("button");
+  exportBtn.type = "button";
+  exportBtn.textContent = "Exportar JSON";
+  exportBtn.style.cssText = "padding: 7px 10px; border-radius: 8px; border: none; background: #2b8a6e; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+
+  const importBtn = document.createElement("button");
+  importBtn.type = "button";
+  importBtn.textContent = "Importar JSON colado";
+  importBtn.style.cssText = "padding: 7px 10px; border-radius: 8px; border: none; background: #356899; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+
+  backupBtnRow.appendChild(diffBtn);
+  backupBtnRow.appendChild(exportBtn);
+  backupBtnRow.appendChild(importBtn);
+
+  const jsonTextarea = document.createElement("textarea");
+  jsonTextarea.id = "admin-json-textarea";
+  jsonTextarea.rows = 3;
+  jsonTextarea.placeholder = "O JSON exportado aparece aqui, ou cole um JSON de ficha para importar...";
+  jsonTextarea.style.cssText = "width: 100%; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: #0a0e12; color: #d6dee6; font-family: monospace; font-size: 11px;";
+
+  const diffOutput = document.createElement("div");
+  diffOutput.id = "admin-diff-output";
+  diffOutput.style.cssText = "font-size: 12px; color: #b8c2cc; white-space: pre-wrap; word-break: break-word;";
+
+  backupSection.appendChild(backupTitle);
+  backupSection.appendChild(backupBtnRow);
+  backupSection.appendChild(jsonTextarea);
+  backupSection.appendChild(diffOutput);
+
+  // 5. Log da Sessão do Admin
+  const logSection = document.createElement("div");
+  logSection.style.cssText = "padding: 10px; border-radius: 8px; background: rgba(10,14,18,0.65); border: 1px solid rgba(255,255,255,0.1);";
+
+  const logTitle = document.createElement("strong");
+  logTitle.textContent = "Log da Sessão do Admin";
+  logTitle.style.cssText = "display: block; font-size: 12px; color: #ffd966; margin-bottom: 6px;";
+
+  const logList = document.createElement("ul");
+  logList.id = "admin-session-log-list";
+  logList.style.cssText = "margin: 0; padding-left: 16px; max-height: 110px; overflow-y: auto; font-size: 11px; color: #d6dee6;";
+
+  logSection.appendChild(logTitle);
+  logSection.appendChild(logList);
+
+  card.appendChild(modalHeader);
+  card.appendChild(uidRow);
+  card.appendChild(recentBox);
+  card.appendChild(msgSection);
+  card.appendChild(quickSection);
+  card.appendChild(backupSection);
+  card.appendChild(logSection);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  closeBtn.addEventListener("click", () => setAdminModalVisibility(false));
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) setAdminModalVisibility(false);
+  });
 
   loadBtn.addEventListener("click", handleAdminLoadTargetUid);
   selfBtn.addEventListener("click", handleAdminReturnToOwnSheet);
   readOnlyBtn.addEventListener("click", handleAdminToggleReadOnly);
   applyQuickBtn.addEventListener("click", handleAdminApplyQuickStats);
+  applyTemplateBtn.addEventListener("click", () => handleAdminApplyTemplate(templateSelect.value));
   sendNoticeBtn.addEventListener("click", handleAdminSendNotice);
   clearNoticeBtn.addEventListener("click", handleAdminClearNotice);
+  diffBtn.addEventListener("click", handleAdminShowDiff);
+  exportBtn.addEventListener("click", handleAdminExportJson);
+  importBtn.addEventListener("click", handleAdminImportJson);
+}
+
+async function handleAdminChatCommandSubmit(event) {
+  event.preventDefault();
+  if (event && event.isTrusted === false) return;
+  if (!isCurrentUserAdmin()) return;
+
+  const input = document.getElementById("admin-chat-command-input");
+  const raw = sanitizeText(input ? input.value : "", 700).trim();
+  if (!raw) return;
+  if (input) input.value = "";
+
+  appendAdminChatMessage("admin", raw);
+  const parts = raw.split(/\s+/);
+  const cmd = parts[0].toLowerCase();
+
+  if (cmd === "/admin" || cmd === "/painel" || cmd === "/menu" || cmd === "admin") {
+    setAdminModalVisibility(true);
+    appendAdminChatMessage("sys", "Painel completo de administração aberto.");
+    return;
+  }
+
+  if (cmd === "/fechar") {
+    setAdminModalVisibility(false);
+    appendAdminChatMessage("sys", "Painel completo fechado.");
+    return;
+  }
+
+  if (cmd === "/ajuda" || cmd === "/help") {
+    appendAdminChatMessage(
+      "sys",
+      "Comandos: /admin (abre painel) | /uid <UID> | /minha | /ler on|off | /recado <min> <texto> | /urgente <min> <texto> | /remover | /modelo <iniciante|veterano|elite> | /diff | /exportar | /log"
+    );
+    return;
+  }
+
+  if (cmd === "/uid" && parts[1]) {
+    const uidInput = document.getElementById("admin-target-uid-input");
+    if (uidInput) uidInput.value = parts[1];
+    await handleAdminLoadTargetUid();
+    appendAdminChatMessage("sys", `Tentativa de carregamento do UID ${parts[1]}.`);
+    return;
+  }
+
+  if (cmd === "/minha") {
+    await handleAdminReturnToOwnSheet();
+    appendAdminChatMessage("sys", "Retornado para a sua própria ficha.");
+    return;
+  }
+
+  if (cmd === "/ler") {
+    const arg = (parts[1] || "").toLowerCase();
+    if (arg === "on" && !state.adminReadOnly) handleAdminToggleReadOnly();
+    else if (arg === "off" && state.adminReadOnly) handleAdminToggleReadOnly();
+    else handleAdminToggleReadOnly();
+    appendAdminChatMessage("sys", `Somente leitura: ${state.adminReadOnly ? "ON" : "OFF"}.`);
+    return;
+  }
+
+  if ((cmd === "/recado" || cmd === "/urgente") && parts.length >= 3) {
+    const minutes = normalizeNoticeMinutes(parts[1]);
+    const text = parts.slice(2).join(" ");
+    const msgInput = document.getElementById("admin-notice-text-input");
+    const durSelect = document.getElementById("admin-notice-duration-select");
+    const prioSelect = document.getElementById("admin-notice-priority-select");
+    if (msgInput) msgInput.value = text;
+    if (durSelect) {
+      const exists = Array.from(durSelect.options).some((o) => Number(o.value) === minutes);
+      if (!exists) {
+        const customOpt = document.createElement("option");
+        customOpt.value = String(minutes);
+        customOpt.textContent = formatDurationLabel(minutes);
+        durSelect.appendChild(customOpt);
+      }
+      durSelect.value = String(minutes);
+    }
+    if (prioSelect) prioSelect.value = cmd === "/urgente" ? "urgent" : "normal";
+    await handleAdminSendNotice();
+    appendAdminChatMessage("sys", `Recado enviado (${formatDurationLabel(minutes)}).`);
+    return;
+  }
+
+  if (cmd === "/remover") {
+    await handleAdminClearNotice();
+    appendAdminChatMessage("sys", "Comando de remoção de recado executado.");
+    return;
+  }
+
+  if (cmd === "/modelo" && parts[1]) {
+    await handleAdminApplyTemplate(parts[1].toLowerCase());
+    appendAdminChatMessage("sys", `Modelo "${parts[1].toLowerCase()}" aplicado.`);
+    return;
+  }
+
+  if (cmd === "/diff") {
+    const changes = computeSheetDiffList();
+    setAdminModalVisibility(true);
+    handleAdminShowDiff();
+    appendAdminChatMessage("sys", `${changes.length} campo(s) alterado(s) desde o carregamento.`);
+    return;
+  }
+
+  if (cmd === "/exportar") {
+    setAdminModalVisibility(true);
+    handleAdminExportJson();
+    appendAdminChatMessage("sys", "JSON da ficha gerado no painel.");
+    return;
+  }
+
+  if (cmd === "/log") {
+    setAdminModalVisibility(true);
+    appendAdminChatMessage("sys", `Total de ${state.adminLogs.length} evento(s) no log.`);
+    return;
+  }
+
+  appendAdminChatMessage("sys", "Comando não reconhecido. Digite /admin para abrir o painel ou /ajuda.");
+}
+
+function handleAdminShowDiff() {
+  const diffOutput = document.getElementById("admin-diff-output");
+  if (!diffOutput) return;
+  const changes = computeSheetDiffList();
+  if (!changes.length) {
+    diffOutput.textContent = "Nenhuma alteração pendente em relação à ficha carregada.";
+    return;
+  }
+  diffOutput.textContent = `Alterações detectadas (${changes.length}):\n• ${changes.slice(0, 25).join("\n• ")}`;
+}
+
+function handleAdminExportJson() {
+  if (!isCurrentUserAdmin()) return;
+  const payload = buildSanitizedCloudPayload();
+  const exportObj = {
+    alvoUid: getActiveTargetUid(),
+    exportadoEm: new Date().toISOString(),
+    fields: payload.fields
+  };
+  const serialized = JSON.stringify(exportObj, null, 2);
+  const textarea = document.getElementById("admin-json-textarea");
+  if (textarea) textarea.value = serialized;
+
+  try {
+    const blob = new Blob([serialized], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ficha_arkan_${getActiveTargetUid() || "backup"}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    // Fallback: JSON já está copiado na textarea do modal
+  }
+
+  appendAdminLog(`JSON exportado do UID ${getActiveTargetUid()}`);
+  setStatusBanner("Backup JSON gerado com sucesso.", "success");
+}
+
+async function handleAdminImportJson() {
+  if (!isCurrentUserAdmin()) return;
+  if (isInspectionReadOnlyActive()) {
+    setStatusBanner("Desative 'Somente leitura' antes de importar um JSON.", "warning");
+    return;
+  }
+
+  const textarea = document.getElementById("admin-json-textarea");
+  const raw = textarea ? textarea.value.trim() : "";
+  if (!raw || raw.length > 500000) {
+    setStatusBanner("Cole um JSON válido na caixa antes de importar.", "warning");
+    return;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !parsed.fields || typeof parsed.fields !== "object") {
+      setStatusBanner("Formato JSON inválido: objeto 'fields' ausente.", "error");
+      return;
+    }
+
+    const safeFields = createSafeRecord();
+    Object.entries(parsed.fields).slice(0, 1500).forEach(([k, v]) => {
+      if (!isValidFieldKey(k)) return;
+      if (typeof v === "boolean") safeFields[k] = v;
+      else if (typeof v === "string" || typeof v === "number") safeFields[k] = String(v).slice(0, 5000);
+    });
+
+    applySheetData({ fields: safeFields });
+    appendAdminLog(`JSON importado na tela para UID ${getActiveTargetUid()}`);
+    await persistSheet(true);
+  } catch {
+    setStatusBanner("Erro ao ler o JSON colado. Verifique a sintaxe.", "error");
+  }
+}
+
+async function handleAdminApplyTemplate(templateKey) {
+  if (!isCurrentUserAdmin()) return;
+  if (isInspectionReadOnlyActive()) {
+    setStatusBanner("Desative 'Somente leitura' antes de aplicar um modelo.", "warning");
+    return;
+  }
+
+  const tpl = Object.prototype.hasOwnProperty.call(SHEET_TEMPLATES, templateKey)
+    ? SHEET_TEMPLATES[templateKey]
+    : null;
+  if (!tpl) {
+    setStatusBanner("Modelo inválido. Use: iniciante, veterano ou elite.", "warning");
+    return;
+  }
+
+  const currentData = collectSheetData();
+  const mergedFields = createSafeRecord();
+  Object.entries(currentData.fields).forEach(([k, v]) => {
+    if (isValidFieldKey(k)) mergedFields[k] = v;
+  });
+  Object.entries(tpl.fields).forEach(([k, v]) => {
+    if (isValidFieldKey(k)) mergedFields[k] = v;
+  });
+
+  applySheetData({ fields: mergedFields });
+  appendAdminLog(`Modelo "${tpl.label}" aplicado ao UID ${getActiveTargetUid()}`);
+  await persistSheet(true);
 }
 
 function handleAdminToggleReadOnly(event) {
@@ -943,6 +1551,7 @@ function handleAdminToggleReadOnly(event) {
     state.saveTimer = null;
   }
   updateAdminBarUI();
+  appendAdminLog(`Somente leitura alterado para ${state.adminReadOnly ? "ON" : "OFF"}`);
   setStatusBanner(
     state.adminReadOnly
       ? "Modo somente leitura ativado: edição e auto-salvamento pausados."
@@ -974,6 +1583,7 @@ async function handleAdminApplyQuickStats(event) {
   }
 
   recalculateSkillsTable();
+  appendAdminLog(`Ajuste rápido salvo no UID ${getActiveTargetUid()}`);
   await persistSheet(true);
 }
 
@@ -996,6 +1606,7 @@ async function handleAdminLoadTargetUid(event) {
   recordRecentAdminUid(uid);
   state.lastSavedSnapshot = "";
   updateAdminBarUI();
+  appendAdminLog(`Ficha carregada do UID ${uid}`);
   setStatusBanner(`Carregando ficha do UID ${uid}...`, "info");
   await loadFromFirestore(uid);
 }
@@ -1008,6 +1619,7 @@ async function handleAdminReturnToOwnSheet(event) {
   saveAdminTargetUidToStorage("");
   state.lastSavedSnapshot = "";
   updateAdminBarUI();
+  appendAdminLog("Retornou para a própria ficha do Admin");
   setStatusBanner("Voltando para a sua própria ficha...", "info");
   await loadFromFirestore(state.user.uid);
 }
@@ -1022,6 +1634,7 @@ async function handleAdminSendNotice(event) {
   const uidInput = document.getElementById("admin-target-uid-input");
   const msgInput = document.getElementById("admin-notice-text-input");
   const durSelect = document.getElementById("admin-notice-duration-select");
+  const prioSelect = document.getElementById("admin-notice-priority-select");
 
   const targetUid = sanitizeTargetUid(uidInput && uidInput.value ? uidInput.value : state.adminTargetUid);
   if (!targetUid) {
@@ -1030,7 +1643,8 @@ async function handleAdminSendNotice(event) {
   }
 
   const minutes = normalizeNoticeMinutes(durSelect ? durSelect.value : MAX_NOTICE_MINUTES);
-  const encodedPayload = buildEncodedNoticePayload(msgInput ? msgInput.value : "", minutes);
+  const priority = normalizeNoticePriority(prioSelect ? prioSelect.value : "normal");
+  const encodedPayload = buildEncodedNoticePayload(msgInput ? msgInput.value : "", minutes, priority);
   if (!encodedPayload) {
     setStatusBanner("Escreva uma mensagem antes de enviar.", "warning");
     return;
@@ -1075,6 +1689,7 @@ async function handleAdminSendNotice(event) {
       updateAdminNoticePreviewUI();
     }
 
+    appendAdminLog(`Recado (${priority === "urgent" ? "Urgente" : "Normal"}, ${formatDurationLabel(minutes)}) enviado para ${targetUid}`);
     setStatusBanner(
       `Mensagem enviada para o UID ${targetUid} (duração: ${formatDurationLabel(minutes)}).`,
       "success"
@@ -1136,6 +1751,7 @@ async function handleAdminClearNotice(event) {
       updateAdminNoticePreviewUI();
     }
 
+    appendAdminLog(`Recado removido do UID ${targetUid}`);
     setStatusBanner(`Recado removido do UID ${targetUid}.`, "success");
   } catch {
     setStatusBanner("Erro ao remover o recado no Firestore.", "error");
@@ -1488,7 +2104,11 @@ function collectSheetData() {
       1,
       Math.min(MAX_NOTICE_MINUTES, Math.ceil((state.activeNotice.expiresAt - Date.now()) / 60000))
     );
-    const reEncoded = buildEncodedNoticePayload(state.activeNotice.msg, remainingMinutes);
+    const reEncoded = buildEncodedNoticePayload(
+      state.activeNotice.msg,
+      remainingMinutes,
+      state.activeNotice.priority
+    );
     if (reEncoded) {
       fields[ADMIN_NOTICE_FIELD_KEY] = reEncoded;
     }
@@ -1517,6 +2137,7 @@ function buildSanitizedCloudPayload() {
             msg: parsedNotice.msg,
             minutes: parsedNotice.minutes,
             hours: Number((parsedNotice.minutes / 60).toFixed(2)),
+            priority: parsedNotice.priority,
             sentAt: Date.now(),
             expiresAt: parsedNotice.expiresAt
           });
@@ -1554,6 +2175,7 @@ function applySheetData(data) {
     recalculateSkillsTable();
     syncNenCategoryFromSelect();
     syncAdminQuickInputsFromSheet();
+    captureBaselineFields(collectSheetData().fields);
     return;
   }
 
@@ -1581,7 +2203,9 @@ function applySheetData(data) {
   });
 
   recalculateSkillsTable();
-  state.lastSavedSnapshot = computeFieldsSnapshot(collectSheetData().fields);
+  const normalizedFields = collectSheetData().fields;
+  captureBaselineFields(normalizedFields);
+  state.lastSavedSnapshot = computeFieldsSnapshot(normalizedFields);
   syncNenCategoryFromSelect();
   syncAdminQuickInputsFromSheet();
   applySheetReadOnlyState();
@@ -1627,6 +2251,7 @@ function resetSheetFieldsToDefault() {
 
   recalculateSkillsTable();
   state.lastSavedSnapshot = "";
+  captureBaselineFields(collectSheetData().fields);
   syncNenCategoryFromSelect();
   syncAdminQuickInputsFromSheet();
 }
@@ -1771,6 +2396,7 @@ async function initFirebase() {
           state.adminTargetUid = "";
           state.adminRecentUids = [];
           state.adminReadOnly = false;
+          state.adminModalOpen = false;
           saveAdminTargetUidToStorage("");
         }
         clearAuthSensitiveInputs();
@@ -1779,6 +2405,7 @@ async function initFirebase() {
         state.adminTargetUid = "";
         state.adminRecentUids = [];
         state.adminReadOnly = false;
+        state.adminModalOpen = false;
         state.activeNotice = null;
         scheduleNoticeExpiryCheck();
         saveAdminTargetUidToStorage("");
@@ -1837,6 +2464,7 @@ async function loadFromFirestore(uid) {
       resetSheetFieldsToDefault();
       const initialData = buildSanitizedCloudPayload();
       await setDoc(docRef, initialData);
+      captureBaselineFields(initialData.fields);
       state.lastSavedSnapshot = computeFieldsSnapshot(initialData.fields);
       state.lastCloudWriteAt = Date.now();
       if (!isCurrentUserAdmin() || uid === state.user?.uid) {
@@ -1903,6 +2531,7 @@ async function handleClearSheetData(event) {
     const { doc, deleteDoc } = state.firebaseModules.firestoreMod;
     try {
       await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, targetUid));
+      appendAdminLog(`Ficha excluída da nuvem para UID ${targetUid}`);
       setStatusBanner(
         isRemoteTarget
           ? `Ficha do UID ${targetUid} excluída da nuvem.`
@@ -1972,6 +2601,7 @@ async function handleLogout(event) {
   state.adminTargetUid = "";
   state.adminRecentUids = [];
   state.adminReadOnly = false;
+  state.adminModalOpen = false;
   state.activeNotice = null;
   scheduleNoticeExpiryCheck();
   saveAdminTargetUidToStorage("");
@@ -2018,6 +2648,7 @@ async function handleDeleteAccount(event) {
     state.adminTargetUid = "";
     state.adminRecentUids = [];
     state.adminReadOnly = false;
+    state.adminModalOpen = false;
     state.activeNotice = null;
     scheduleNoticeExpiryCheck();
     saveAdminTargetUidToStorage("");
@@ -2082,6 +2713,7 @@ async function persistSheet(forceWrite = false) {
 
       const cloudPayload = buildSanitizedCloudPayload();
       await saveToFirestore(targetUid, cloudPayload);
+      captureBaselineFields(cloudPayload.fields);
       state.lastSavedSnapshot = computeFieldsSnapshot(cloudPayload.fields);
       syncAdminQuickInputsFromSheet();
       setStatusBanner(
@@ -2091,6 +2723,7 @@ async function persistSheet(forceWrite = false) {
         "success"
       );
     } else if (hasCookieConsent()) {
+      captureBaselineFields(payload.fields);
       state.lastSavedSnapshot = currentSnapshot;
       setStatusBanner("Alterações salvas localmente.", "info");
     } else {
@@ -2367,6 +3000,7 @@ document.addEventListener("DOMContentLoaded", () => {
     recalculateSkillsTable();
     syncNenCategoryFromSelect();
     syncAdminQuickInputsFromSheet();
+    captureBaselineFields(collectSheetData().fields);
   }
 
   setActiveSectionIndicator("dados-agente");
