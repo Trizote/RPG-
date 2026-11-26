@@ -1,13 +1,15 @@
 {
-  "version": "2026.11.25.2354-1130c25",
-  "publishedAt": "2026-11-25T23:54:49.772Z",
+  "version": "2026.11.26.0524-ca7cf3b",
+  "publishedAt": "2026-11-26T05:24:07.145Z",
   "filesUpdated": [
-    "script.js"
+    "index.html",
+    "script.js",
+    "style.css"
   ],
   "addedFunctions": [
-    "Atualização automática via GitHub (git add .github/workflows/update-manifest.yml release-manifest.json script.js git commit -m \"feat: adiciona aviso de atualizacao no admin master e manifesto automatico\" git push origin main)"
+    "Atualização automática via GitHub (update)"
   ],
   "improvements": [
-    "Build #1130c25 publicado automaticamente na branch main"
+    "Build #ca7cf3b publicado automaticamente na branch main"
   ]
 }
