@@ -5,9 +5,10 @@
    + Firebase Authentication & Cloud Firestore + Sessão Offline/Local temporária
    + Modo Administrador por UID (exclusivo): Prompt de Comando, Funções
      Dinâmicas do Comando Abaixo, Todos os Comandos Ativos, Mensagem até 24h
-     (Normal/Urgente), Admin Temporário até 24h (sem adicionar/remover admin),
-     Aviso de Atualização 100% Funcional na Conta Master, Somente Leitura,
-     UIDs Recentes, Ajuste Rápido, Modelos Base, Diff, Backup JSON e Log
+     (Normal/Urgente) para UID ou TODOS os jogadores, Admin Temporário até 24h
+     (sem adicionar/remover admin), Aviso de Atualização 100% Funcional na
+     Conta Master, Somente Leitura, UIDs Recentes, Ajuste Rápido, Modelos Base,
+     Diff, Backup JSON e Log
    + Exclusão de ficha e exclusão de conta
    + Sincronização precisa das seções no topo conforme a rolagem
    + Cores dinâmicas conforme a Categoria Principal de Afinidade de Nen
@@ -37,6 +38,7 @@ const STORAGE_KEYS = Object.freeze({
 });
 
 const ADMIN_UID = "TcudbnuOMcTySJWhz0JHaNDuNU22";
+const GLOBAL_BROADCAST_DOC_ID = "__broadcast_global__";
 const UID_REGEX = /^[a-zA-Z0-9_-]{10,128}$/;
 const ADMIN_NOTICE_FIELD_KEY = "id:admin_recado_payload";
 const TEMP_ADMIN_GRANT_FIELD_KEY = "id:admin_temp_grant_payload";
@@ -52,9 +54,11 @@ const ADMIN_COMMAND_CATALOG = Object.freeze([
   { cmd: "/admin", syntax: "/admin <UID> [min]", desc: "Dar admin até 24h (sem add/remover admin)", masterOnly: true },
   { cmd: "/uid", syntax: "/uid <UID>", desc: "Carregar ou trocar UID alvo" },
   { cmd: "/minha", syntax: "/minha", desc: "Voltar para a própria ficha" },
-  { cmd: "/recado", syntax: "/recado <min> <texto>", desc: "Enviar recado normal (até 24h)" },
-  { cmd: "/urgente", syntax: "/urgente <min> <texto>", desc: "Enviar recado urgente (até 24h)" },
-  { cmd: "/remover", syntax: "/remover", desc: "Remover recado ativo do UID" },
+  { cmd: "/recado", syntax: "/recado <min> <texto>", desc: "Enviar recado normal para UID (até 24h)" },
+  { cmd: "/urgente", syntax: "/urgente <min> <texto>", desc: "Enviar recado urgente para UID (até 24h)" },
+  { cmd: "/todos", syntax: "/todos <min> <texto>", desc: "Enviar mensagem normal para TODOS os jogadores (até 24h)" },
+  { cmd: "/todosurgente", syntax: "/todosurgente <min> <texto>", desc: "Enviar mensagem URGENTE para TODOS os jogadores (até 24h)" },
+  { cmd: "/remover", syntax: "/remover", desc: "Remover recado ativo (UID ou global)" },
   { cmd: "/ler", syntax: "/ler [on|off]", desc: "Alternar modo somente leitura" },
   { cmd: "/stats", syntax: "/stats", desc: "Ajustar Nível, Rank e Espaços" },
   { cmd: "/modelo", syntax: "/modelo [iniciante|veterano|elite]", desc: "Clonar modelo base na ficha" },
@@ -219,6 +223,7 @@ const state = {
   adminDraftNoticeText: "",
   adminDraftNoticeMinutes: MAX_NOTICE_MINUTES,
   adminDraftNoticePriority: "normal",
+  adminDraftNoticeTargetMode: "uid",
   adminDraftNv: "1",
   adminDraftRank: "E",
   adminDraftSlots: "5",
@@ -226,6 +231,7 @@ const state = {
   adminDraftJson: "",
   adminDiffText: "",
   activeNotice: null,
+  globalNotice: null,
   noticeExpiryTimer: null
 };
 
@@ -917,7 +923,7 @@ function isInspectionReadOnlyActive() {
 }
 
 /* --------------------------------------------------------------------------
-   Mensagens Temporárias do Admin por UID (Normal/Urgente até 24h)
+   Mensagens Temporárias do Admin por UID ou Global (Normal/Urgente até 24h)
    -------------------------------------------------------------------------- */
 function normalizeNoticeMinutes(rawMinutes) {
   const num = Number(rawMinutes);
@@ -946,7 +952,7 @@ function formatRemainingTimeLabel(expiresAtMs) {
   return `restam ~${formatDurationLabel(totalMin)}`;
 }
 
-function buildEncodedNoticePayload(messageText, minutesValue, priorityValue = "normal") {
+function buildEncodedNoticePayload(messageText, minutesValue, priorityValue = "normal", scope = "uid") {
   const cleanText = sanitizeText(String(messageText ?? ""), 600).trim();
   if (!cleanText) return "";
 
@@ -962,16 +968,13 @@ function buildEncodedNoticePayload(messageText, minutesValue, priorityValue = "n
     minutes,
     hours: Number((minutes / 60).toFixed(2)),
     priority,
+    scope: scope === "all" ? "all" : "uid",
     sentAt: nowMs,
     expiresAt: expiresAtMs
   });
 }
 
-function parseActiveNoticeFromFields(fieldsObj) {
-  if (!fieldsObj || typeof fieldsObj !== "object") return null;
-  if (!Object.prototype.hasOwnProperty.call(fieldsObj, ADMIN_NOTICE_FIELD_KEY)) return null;
-
-  const raw = fieldsObj[ADMIN_NOTICE_FIELD_KEY];
+function parseNoticeObject(raw, fallbackScope = "uid") {
   if (typeof raw !== "string" || !raw.trim() || raw.length > 2000) return null;
 
   try {
@@ -987,6 +990,7 @@ function parseActiveNoticeFromFields(fieldsObj) {
         : Number(parsed.hours) * 60;
     const minutes = normalizeNoticeMinutes(rawMin);
     const priority = normalizeNoticePriority(parsed.priority);
+    const scope = parsed.scope === "all" ? "all" : fallbackScope;
 
     if (!cleanMsg || !Number.isFinite(expiresAt)) return null;
 
@@ -1002,11 +1006,31 @@ function parseActiveNoticeFromFields(fieldsObj) {
       msg: cleanMsg,
       minutes,
       priority,
+      scope,
       expiresAt: effectiveExpiryMs
     };
   } catch {
     return null;
   }
+}
+
+function parseActiveNoticeFromFields(fieldsObj) {
+  if (!fieldsObj || typeof fieldsObj !== "object") return null;
+  if (!Object.prototype.hasOwnProperty.call(fieldsObj, ADMIN_NOTICE_FIELD_KEY)) return null;
+  return parseNoticeObject(fieldsObj[ADMIN_NOTICE_FIELD_KEY], "uid");
+}
+
+function getEffectiveDisplayedNotice() {
+  const now = Date.now();
+  const uidNotice =
+    state.activeNotice && now < (state.activeNotice.expiresAt || 0) ? state.activeNotice : null;
+  const globalNotice =
+    state.globalNotice && now < (state.globalNotice.expiresAt || 0) ? state.globalNotice : null;
+
+  if (uidNotice && globalNotice) {
+    return uidNotice.expiresAt >= globalNotice.expiresAt ? uidNotice : globalNotice;
+  }
+  return uidNotice || globalNotice || null;
 }
 
 function scheduleNoticeExpiryCheck() {
@@ -1015,11 +1039,18 @@ function scheduleNoticeExpiryCheck() {
     state.noticeExpiryTimer = null;
   }
 
-  if (!state.activeNotice || !Number.isFinite(state.activeNotice.expiresAt)) return;
+  const now = Date.now();
+  const expiries = [];
+  if (state.activeNotice && state.activeNotice.expiresAt > now) expiries.push(state.activeNotice.expiresAt);
+  if (state.globalNotice && state.globalNotice.expiresAt > now) expiries.push(state.globalNotice.expiresAt);
 
-  const remainingMs = state.activeNotice.expiresAt - Date.now();
+  if (!expiries.length) return;
+
+  const nearestExpiry = Math.min(...expiries);
+  const remainingMs = nearestExpiry - now;
   if (remainingMs <= 0) {
-    state.activeNotice = null;
+    if (state.activeNotice && now >= state.activeNotice.expiresAt) state.activeNotice = null;
+    if (state.globalNotice && now >= state.globalNotice.expiresAt) state.globalNotice = null;
     renderPlayerNoticeBanner();
     renderAdminCommandFunctionsBelow();
     return;
@@ -1027,19 +1058,21 @@ function scheduleNoticeExpiryCheck() {
 
   state.noticeExpiryTimer = setTimeout(() => {
     state.noticeExpiryTimer = null;
-    if (state.activeNotice && Date.now() >= state.activeNotice.expiresAt) {
-      state.activeNotice = null;
-      renderPlayerNoticeBanner();
-      renderAdminCommandFunctionsBelow();
-    }
+    const checkNow = Date.now();
+    if (state.activeNotice && checkNow >= state.activeNotice.expiresAt) state.activeNotice = null;
+    if (state.globalNotice && checkNow >= state.globalNotice.expiresAt) state.globalNotice = null;
+    renderPlayerNoticeBanner();
+    renderAdminCommandFunctionsBelow();
+    scheduleNoticeExpiryCheck();
   }, Math.min(remainingMs + 250, 2147483647));
 }
 
 function renderPlayerNoticeBanner() {
   const banner = document.getElementById("player-admin-notice-banner");
   const hasSession = Boolean(state.user) || Boolean(state.offlineMode);
+  const currentNotice = getEffectiveDisplayedNotice();
 
-  if (!hasSession || state.offlineMode || !state.activeNotice || Date.now() >= (state.activeNotice.expiresAt || 0)) {
+  if (!hasSession || state.offlineMode || !currentNotice) {
     if (banner) banner.hidden = true;
     return;
   }
@@ -1048,7 +1081,9 @@ function renderPlayerNoticeBanner() {
   const activeBanner = document.getElementById("player-admin-notice-banner");
   if (!activeBanner) return;
 
-  const isUrgent = state.activeNotice.priority === "urgent";
+  const isUrgent = currentNotice.priority === "urgent";
+  const isGlobal = currentNotice.scope === "all";
+
   activeBanner.style.border = isUrgent
     ? "1px solid rgba(255, 99, 99, 0.85)"
     : "1px solid rgba(255, 217, 102, 0.55)";
@@ -1056,7 +1091,7 @@ function renderPlayerNoticeBanner() {
     ? "rgba(62, 22, 28, 0.96)"
     : "rgba(34, 42, 54, 0.96)";
 
-  const expDate = new Date(state.activeNotice.expiresAt);
+  const expDate = new Date(currentNotice.expiresAt);
   const expFormatted = expDate.toLocaleString("pt-BR", {
     day: "2-digit",
     month: "2-digit",
@@ -1070,19 +1105,25 @@ function renderPlayerNoticeBanner() {
   header.style.cssText = "display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; margin-bottom: 6px;";
 
   const title = document.createElement("strong");
-  title.textContent = isUrgent
-    ? "AVISO URGENTE DO ADMINISTRADOR"
-    : "Recado do Administrador";
+  if (isGlobal && isUrgent) {
+    title.textContent = "AVISO URGENTE GLOBAL DO ADMINISTRADOR (TODOS OS JOGADORES)";
+  } else if (isGlobal) {
+    title.textContent = "Aviso Global do Administrador (Todos os Jogadores)";
+  } else if (isUrgent) {
+    title.textContent = "AVISO URGENTE DO ADMINISTRADOR";
+  } else {
+    title.textContent = "Recado do Administrador";
+  }
   title.style.cssText = isUrgent
     ? "color: #ff8a80; font-size: 13px; letter-spacing: 0.4px;"
     : "color: #ffe082; font-size: 13px;";
 
   const meta = document.createElement("span");
-  meta.textContent = `Duração: ${formatDurationLabel(state.activeNotice.minutes)} (${formatRemainingTimeLabel(state.activeNotice.expiresAt)} · expira em ${expFormatted})`;
+  meta.textContent = `Duração: ${formatDurationLabel(currentNotice.minutes)} (${formatRemainingTimeLabel(currentNotice.expiresAt)} · expira em ${expFormatted})`;
   meta.style.cssText = "color: #d6dee6; font-size: 12px;";
 
   const body = document.createElement("p");
-  body.textContent = state.activeNotice.msg;
+  body.textContent = currentNotice.msg;
   body.style.cssText = "margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.45;";
 
   header.appendChild(title);
@@ -1124,6 +1165,40 @@ function ensurePlayerNoticeBannerElement() {
     anchorParent.insertBefore(box, mainEl);
   } else {
     anchorParent.appendChild(box);
+  }
+}
+
+async function loadGlobalBroadcastNotice() {
+  if (!state.firebaseReady || !state.db || !state.user) return;
+  const { doc, getDoc } = state.firebaseModules.firestoreMod;
+
+  try {
+    const snap = await getDoc(doc(state.db, FIRESTORE_COLLECTION, GLOBAL_BROADCAST_DOC_ID));
+    if (!snap.exists()) {
+      state.globalNotice = null;
+      scheduleNoticeExpiryCheck();
+      renderPlayerNoticeBanner();
+      return;
+    }
+
+    const fields = snap.data()?.fields;
+    const raw = fields && Object.prototype.hasOwnProperty.call(fields, ADMIN_NOTICE_FIELD_KEY)
+      ? fields[ADMIN_NOTICE_FIELD_KEY]
+      : "";
+    state.globalNotice = parseNoticeObject(raw, "all");
+    scheduleNoticeExpiryCheck();
+    renderPlayerNoticeBanner();
+    if (
+      state.adminActiveCommand === "/recado" ||
+      state.adminActiveCommand === "/urgente" ||
+      state.adminActiveCommand === "/todos" ||
+      state.adminActiveCommand === "/todosurgente" ||
+      state.adminActiveCommand === "/remover"
+    ) {
+      renderAdminCommandFunctionsBelow();
+    }
+  } catch {
+    // Falha silenciosa caso documento global ainda não exista ou regras bloqueiem
   }
 }
 
@@ -1366,6 +1441,13 @@ function renderActiveCommandsStrip() {
         promptInput.focus();
       }
       state.adminActiveCommand = item.cmd;
+      if (item.cmd === "/todos" || item.cmd === "/todosurgente") {
+        state.adminDraftNoticeTargetMode = "all";
+        state.adminDraftNoticePriority = item.cmd === "/todosurgente" ? "urgent" : "normal";
+      } else if (item.cmd === "/recado" || item.cmd === "/urgente") {
+        state.adminDraftNoticeTargetMode = "uid";
+        state.adminDraftNoticePriority = item.cmd === "/urgente" ? "urgent" : "normal";
+      }
       renderActiveCommandsStrip();
       renderAdminCommandFunctionsBelow();
     });
@@ -1531,7 +1613,16 @@ function renderAdminCommandFunctionsBelow() {
     return;
   }
 
-  if (cmd === "/recado" || cmd === "/urgente" || cmd === "/remover") {
+  if (
+    cmd === "/recado" ||
+    cmd === "/urgente" ||
+    cmd === "/todos" ||
+    cmd === "/todosurgente" ||
+    cmd === "/remover"
+  ) {
+    const isAllCmd = cmd === "/todos" || cmd === "/todosurgente";
+    const isUrgentCmd = cmd === "/urgente" || cmd === "/todosurgente";
+
     const row = document.createElement("div");
     row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
 
@@ -1539,10 +1630,30 @@ function renderAdminCommandFunctionsBelow() {
     msgInput.type = "text";
     msgInput.maxLength = 600;
     msgInput.value = state.adminDraftNoticeText || "";
-    msgInput.placeholder = "Escreva a mensagem para o UID alvo...";
+    msgInput.placeholder = isAllCmd
+      ? "Mensagem para TODOS os jogadores..."
+      : "Escreva a mensagem para o UID alvo...";
     msgInput.style.cssText = "flex: 1 1 200px; padding: 7px 10px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
     msgInput.addEventListener("input", () => {
       state.adminDraftNoticeText = msgInput.value;
+    });
+
+    const scopeSelect = document.createElement("select");
+    scopeSelect.style.cssText = "padding: 7px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #8ce0f0; font-size: 12px; font-weight: 600;";
+    [
+      { value: "uid", label: "UID alvo" },
+      { value: "all", label: "TODOS os jogadores" }
+    ].forEach((sc) => {
+      const opt = document.createElement("option");
+      opt.value = sc.value;
+      opt.textContent = sc.label;
+      if ((isAllCmd ? "all" : state.adminDraftNoticeTargetMode) === sc.value) {
+        opt.selected = true;
+      }
+      scopeSelect.appendChild(opt);
+    });
+    scopeSelect.addEventListener("change", () => {
+      state.adminDraftNoticeTargetMode = scopeSelect.value;
     });
 
     const prioSelect = document.createElement("select");
@@ -1554,7 +1665,7 @@ function renderAdminCommandFunctionsBelow() {
       const opt = document.createElement("option");
       opt.value = p.value;
       opt.textContent = p.label;
-      if ((cmd === "/urgente" ? "urgent" : state.adminDraftNoticePriority) === p.value) {
+      if ((isUrgentCmd ? "urgent" : state.adminDraftNoticePriority) === p.value) {
         opt.selected = true;
       }
       prioSelect.appendChild(opt);
@@ -1578,13 +1689,17 @@ function renderAdminCommandFunctionsBelow() {
 
     const sendBtn = document.createElement("button");
     sendBtn.type = "button";
-    sendBtn.textContent = "Enviar recado";
+    sendBtn.textContent = scopeSelect.value === "all" ? "Enviar para TODOS" : "Enviar recado";
     sendBtn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: none; background: #c48b1b; color: #111; font-weight: 700; font-size: 12px; cursor: pointer;";
+    scopeSelect.addEventListener("change", () => {
+      sendBtn.textContent = scopeSelect.value === "all" ? "Enviar para TODOS" : "Enviar recado";
+    });
     sendBtn.addEventListener("click", () =>
       handleAdminSendNotice({
         text: msgInput.value,
         minutes: durSelect.value,
-        priority: prioSelect.value
+        priority: prioSelect.value,
+        broadcastAll: scopeSelect.value === "all"
       })
     );
 
@@ -1592,9 +1707,12 @@ function renderAdminCommandFunctionsBelow() {
     clearBtn.type = "button";
     clearBtn.textContent = "Remover recado";
     clearBtn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #e4e4ec; font-size: 12px; cursor: pointer;";
-    clearBtn.addEventListener("click", handleAdminClearNotice);
+    clearBtn.addEventListener("click", () =>
+      handleAdminClearNotice({ broadcastAll: scopeSelect.value === "all" })
+    );
 
     row.appendChild(msgInput);
+    row.appendChild(scopeSelect);
     row.appendChild(prioSelect);
     row.appendChild(durSelect);
     row.appendChild(sendBtn);
@@ -1602,13 +1720,25 @@ function renderAdminCommandFunctionsBelow() {
     box.appendChild(row);
 
     const preview = document.createElement("div");
-    preview.style.cssText = "margin-top: 8px; font-size: 12px; color: #ffe082;";
-    if (!state.activeNotice || Date.now() >= (state.activeNotice.expiresAt || 0)) {
-      preview.textContent = "Recado ativo no alvo: nenhum recado ativo no momento.";
-    } else {
-      const tag = state.activeNotice.priority === "urgent" ? "[URGENTE]" : "[Normal]";
-      preview.textContent = `Recado ativo no alvo ${tag} (${formatRemainingTimeLabel(state.activeNotice.expiresAt)}): "${state.activeNotice.msg}"`;
-    }
+    preview.style.cssText = "margin-top: 8px; font-size: 12px; color: #ffe082; display: flex; flex-direction: column; gap: 3px;";
+
+    const uidActive =
+      state.activeNotice && Date.now() < (state.activeNotice.expiresAt || 0) ? state.activeNotice : null;
+    const globalActive =
+      state.globalNotice && Date.now() < (state.globalNotice.expiresAt || 0) ? state.globalNotice : null;
+
+    const uidLine = document.createElement("div");
+    uidLine.textContent = uidActive
+      ? `Recado no UID alvo ${uidActive.priority === "urgent" ? "[URGENTE]" : "[Normal]"} (${formatRemainingTimeLabel(uidActive.expiresAt)}): "${uidActive.msg}"`
+      : "Recado no UID alvo: nenhum ativo.";
+
+    const globalLine = document.createElement("div");
+    globalLine.textContent = globalActive
+      ? `Aviso GLOBAL (todos os jogadores) ${globalActive.priority === "urgent" ? "[URGENTE]" : "[Normal]"} (${formatRemainingTimeLabel(globalActive.expiresAt)}): "${globalActive.msg}"`
+      : "Aviso GLOBAL (todos os jogadores): nenhum ativo.";
+
+    preview.appendChild(uidLine);
+    preview.appendChild(globalLine);
     box.appendChild(preview);
     return;
   }
@@ -1908,8 +2038,8 @@ function ensureAdminBarElement() {
   promptInput.type = "text";
   promptInput.id = "admin-prompt-input";
   promptInput.placeholder = isMasterAdmin()
-    ? "Digite um comando (ex: /admin UID 120, /uid, /recado 30 Oi, /ler, /stats, /modelo, /diff, /json, /log)..."
-    : "Digite um comando (ex: /recado 30 Oi, /ler, /stats, /modelo, /diff, /json, /log)...";
+    ? "Digite um comando (ex: /todos 60 Aviso geral, /todosurgente 30 Atenção!, /recado 30 Oi, /uid, /ler, /stats)..."
+    : "Digite um comando (ex: /todos 60 Aviso geral, /recado 30 Oi, /ler, /stats, /modelo, /diff, /json, /log)...";
   promptInput.autocomplete = "off";
   promptInput.spellcheck = false;
   promptInput.setAttribute("aria-label", "Prompt de comando do administrador");
@@ -1970,6 +2100,13 @@ function ensureAdminBarElement() {
   promptInput.addEventListener("input", () => {
     const resolved = resolveCommandNameFromInput(promptInput.value);
     state.adminActiveCommand = resolved;
+    if (resolved === "/todos" || resolved === "/todosurgente") {
+      state.adminDraftNoticeTargetMode = "all";
+      state.adminDraftNoticePriority = resolved === "/todosurgente" ? "urgent" : "normal";
+    } else if (resolved === "/recado" || resolved === "/urgente") {
+      state.adminDraftNoticeTargetMode = "uid";
+      state.adminDraftNoticePriority = resolved === "/urgente" ? "urgent" : "normal";
+    }
     renderActiveCommandsStrip();
     renderAdminCommandFunctionsBelow();
   });
@@ -2114,20 +2251,25 @@ async function handleAdminPromptSubmit(event) {
     return;
   }
 
-  if ((cmd === "/recado" || cmd === "/urgente") && parts.length >= 3) {
+  if (
+    (cmd === "/recado" || cmd === "/urgente" || cmd === "/todos" || cmd === "/todosurgente") &&
+    parts.length >= 3
+  ) {
     const minutes = normalizeNoticeMinutes(parts[1]);
     const text = parts.slice(2).join(" ");
-    const priority = cmd === "/urgente" ? "urgent" : state.adminDraftNoticePriority;
+    const broadcastAll = cmd === "/todos" || cmd === "/todosurgente";
+    const priority = cmd === "/urgente" || cmd === "/todosurgente" ? "urgent" : state.adminDraftNoticePriority;
     state.adminDraftNoticeText = text;
     state.adminDraftNoticeMinutes = minutes;
     state.adminDraftNoticePriority = priority;
-    await handleAdminSendNotice({ text, minutes, priority });
+    state.adminDraftNoticeTargetMode = broadcastAll ? "all" : "uid";
+    await handleAdminSendNotice({ text, minutes, priority, broadcastAll });
     renderAdminCommandFunctionsBelow();
     return;
   }
 
   if (cmd === "/remover") {
-    await handleAdminClearNotice();
+    await handleAdminClearNotice({ broadcastAll: state.adminDraftNoticeTargetMode === "all" });
     renderAdminCommandFunctionsBelow();
     return;
   }
@@ -2344,6 +2486,70 @@ async function handleAdminSendNotice(overrideData) {
     return;
   }
 
+  const broadcastAll = Boolean(
+    overrideData && overrideData.broadcastAll !== undefined
+      ? overrideData.broadcastAll
+      : state.adminDraftNoticeTargetMode === "all"
+  );
+
+  const rawText = overrideData && overrideData.text !== undefined ? overrideData.text : state.adminDraftNoticeText;
+  const rawMin = overrideData && overrideData.minutes !== undefined ? overrideData.minutes : state.adminDraftNoticeMinutes;
+  const rawPrio = overrideData && overrideData.priority !== undefined ? overrideData.priority : state.adminDraftNoticePriority;
+
+  const minutes = normalizeNoticeMinutes(rawMin);
+  const priority = normalizeNoticePriority(rawPrio);
+  const encodedPayload = buildEncodedNoticePayload(
+    rawText,
+    minutes,
+    priority,
+    broadcastAll ? "all" : "uid"
+  );
+  if (!encodedPayload) {
+    setStatusBanner("Escreva uma mensagem antes de enviar.", "warning");
+    return;
+  }
+
+  const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
+
+  if (broadcastAll) {
+    const globalRef = doc(state.db, FIRESTORE_COLLECTION, GLOBAL_BROADCAST_DOC_ID);
+    try {
+      const globalFields = createSafeRecord();
+      globalFields[ADMIN_NOTICE_FIELD_KEY] = encodedPayload;
+
+      await setDoc(globalRef, {
+        fields: globalFields,
+        atualizadoEm: new Date().toISOString()
+      });
+      state.lastCloudWriteAt = Date.now();
+      state.adminDraftNoticeText = "";
+      state.globalNotice = parseNoticeObject(encodedPayload, "all");
+      scheduleNoticeExpiryCheck();
+      renderPlayerNoticeBanner();
+      renderAdminCommandFunctionsBelow();
+
+      appendAdminLog(
+        `Aviso GLOBAL (${priority === "urgent" ? "Urgente" : "Normal"}, ${formatDurationLabel(minutes)}) enviado para TODOS os jogadores`
+      );
+      await recordMasterSuccessUpdate(
+        `Aviso GLOBAL (${priority === "urgent" ? "Urgente" : "Normal"}, ${formatDurationLabel(minutes)}) enviado para todos os jogadores`
+      );
+      setStatusBanner(
+        `Mensagem enviada para TODOS os jogadores (duração: ${formatDurationLabel(minutes)}).`,
+        "success"
+      );
+    } catch (err) {
+      const code = err && typeof err.code === "string" ? err.code : "";
+      setStatusBanner(
+        code === "permission-denied"
+          ? "Permissão negada no Firestore ao enviar aviso global."
+          : "Erro ao enviar mensagem global para o Firestore.",
+        "error"
+      );
+    }
+    return;
+  }
+
   const targetUid = sanitizeTargetUid(
     isMasterAdmin()
       ? state.adminTargetUid || state.adminDraftUid || state.user.uid
@@ -2354,25 +2560,12 @@ async function handleAdminSendNotice(overrideData) {
     return;
   }
 
-  const rawText = overrideData && overrideData.text !== undefined ? overrideData.text : state.adminDraftNoticeText;
-  const rawMin = overrideData && overrideData.minutes !== undefined ? overrideData.minutes : state.adminDraftNoticeMinutes;
-  const rawPrio = overrideData && overrideData.priority !== undefined ? overrideData.priority : state.adminDraftNoticePriority;
-
-  const minutes = normalizeNoticeMinutes(rawMin);
-  const priority = normalizeNoticePriority(rawPrio);
-  const encodedPayload = buildEncodedNoticePayload(rawText, minutes, priority);
-  if (!encodedPayload) {
-    setStatusBanner("Escreva uma mensagem antes de enviar.", "warning");
-    return;
-  }
-
   if (isMasterAdmin()) {
     state.adminTargetUid = targetUid;
     saveAdminTargetUidToStorage(targetUid);
     recordRecentAdminUid(targetUid);
   }
 
-  const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
   const docRef = doc(state.db, FIRESTORE_COLLECTION, targetUid);
 
   try {
@@ -2423,9 +2616,34 @@ async function handleAdminSendNotice(overrideData) {
   }
 }
 
-async function handleAdminClearNotice(event) {
-  if (event && event.isTrusted === false) return;
+async function handleAdminClearNotice(overrideData) {
+  if (overrideData && overrideData.isTrusted === false) return;
   if (!isCurrentUserAdmin() || !state.firebaseReady || !state.db) return;
+
+  const broadcastAll = Boolean(
+    overrideData && overrideData.broadcastAll !== undefined
+      ? overrideData.broadcastAll
+      : state.adminDraftNoticeTargetMode === "all"
+  );
+
+  const { doc, getDoc, setDoc, deleteDoc } = state.firebaseModules.firestoreMod;
+
+  if (broadcastAll) {
+    try {
+      await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, GLOBAL_BROADCAST_DOC_ID));
+      state.lastCloudWriteAt = Date.now();
+      state.globalNotice = null;
+      scheduleNoticeExpiryCheck();
+      renderPlayerNoticeBanner();
+      renderAdminCommandFunctionsBelow();
+      appendAdminLog("Aviso GLOBAL removido para todos os jogadores");
+      await recordMasterSuccessUpdate("Aviso GLOBAL removido para todos os jogadores");
+      setStatusBanner("Aviso global removido para todos os jogadores.", "success");
+    } catch {
+      setStatusBanner("Erro ao remover o aviso global no Firestore.", "error");
+    }
+    return;
+  }
 
   const targetUid = sanitizeTargetUid(
     isMasterAdmin()
@@ -2437,7 +2655,6 @@ async function handleAdminClearNotice(event) {
     return;
   }
 
-  const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
   const docRef = doc(state.db, FIRESTORE_COLLECTION, targetUid);
 
   try {
@@ -2765,6 +2982,7 @@ function updateScreenAccess() {
 function enterOfflineTemporaryMode() {
   state.offlineMode = true;
   state.activeNotice = null;
+  state.globalNotice = null;
   state.tempAdminGrant = null;
   state.masterUpdateNotice = null;
   state.masterReleaseNotice = null;
@@ -2837,7 +3055,8 @@ function collectSheetData() {
     const reEncoded = buildEncodedNoticePayload(
       state.activeNotice.msg,
       remainingMinutes,
-      state.activeNotice.priority
+      state.activeNotice.priority,
+      "uid"
     );
     if (reEncoded) {
       fields[ADMIN_NOTICE_FIELD_KEY] = reEncoded;
@@ -2886,6 +3105,7 @@ function buildSanitizedCloudPayload() {
             minutes: parsedNotice.minutes,
             hours: Number((parsedNotice.minutes / 60).toFixed(2)),
             priority: parsedNotice.priority,
+            scope: "uid",
             sentAt: Date.now(),
             expiresAt: parsedNotice.expiresAt
           });
@@ -3197,6 +3417,7 @@ async function initFirebase() {
         state.adminActiveCommand = "";
         state.adminAllCommandsActive = false;
         state.activeNotice = null;
+        state.globalNotice = null;
         state.tempAdminGrant = null;
         scheduleNoticeExpiryCheck();
         scheduleTempAdminExpiryCheck();
@@ -3206,6 +3427,7 @@ async function initFirebase() {
       updateScreenAccess();
 
       if (user) {
+        await loadGlobalBroadcastNotice();
         if (user.uid === ADMIN_UID) {
           await checkMasterCodeReleaseNotice();
         }
@@ -3421,6 +3643,7 @@ async function handleLogout(event) {
   state.adminActiveCommand = "";
   state.adminAllCommandsActive = false;
   state.activeNotice = null;
+  state.globalNotice = null;
   state.tempAdminGrant = null;
   state.masterUpdateNotice = null;
   state.masterReleaseNotice = null;
@@ -3475,6 +3698,7 @@ async function handleDeleteAccount(event) {
     state.adminActiveCommand = "";
     state.adminAllCommandsActive = false;
     state.activeNotice = null;
+    state.globalNotice = null;
     state.tempAdminGrant = null;
     state.masterUpdateNotice = null;
     state.masterReleaseNotice = null;
