@@ -208,7 +208,7 @@ body {
 }
 
 .entrada-3d-palco {
-  perspective: 850px;
+  perspective: 800px;
   display: inline-block;
   padding: 10px 20px;
 }
@@ -223,7 +223,9 @@ body {
 }
 
 .entrada-kicker-topo {
+  opacity: 0;
   text-shadow: 0 2px 14px rgba(38, 153, 188, 0.72);
+  animation: fadeDownSubtitle 0.45s ease forwards;
 }
 
 .entrada-titulo-3d {
@@ -235,21 +237,108 @@ body {
   line-height: 1.08;
   transform: rotateX(13deg) rotateY(-4deg) skewX(-3deg);
   transform-style: preserve-3d;
-  transition: transform 0.25s ease, text-shadow 0.25s ease;
+  transition: transform 0.2s ease, text-shadow 0.2s ease;
   text-shadow:
     0 1px 0 #4ab897,
     0 2px 0 #3ca888,
     0 3px 0 #2e8e72,
     0 4px 0 #1f6f58,
     0 5px 0 #165543,
-    0 6px 0 #0e3d30,
-    0 7px 0 #08271e,
-    0 16px 30px rgba(0, 0, 0, 0.92),
-    0 0 36px rgba(38, 153, 188, 0.55);
+    0 14px 26px rgba(0, 0, 0, 0.88),
+    0 0 28px rgba(38, 153, 188, 0.45);
 }
 
 .entrada-3d-palco:hover .entrada-titulo-3d {
-  transform: rotateX(6deg) rotateY(0deg) skewX(-2deg) scale(1.025);
+  transform: rotateX(6deg) rotateY(0deg) skewX(-2deg) scale(1.02);
+}
+
+/* Animação 3D de digitação letra por letra (rápida e leve) */
+.titulo-3d-digitando {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  transform-style: preserve-3d;
+}
+
+.titulo-3d-digitando .char-3d {
+  display: inline-block;
+  opacity: 0;
+  transform-origin: 50% 80%;
+  transform: translate3d(0, 8px, -18px) rotateX(-45deg) scale(0.85);
+  text-shadow:
+    0 2px 0 #38b8a1,
+    0 4px 0 #167565,
+    0 10px 18px rgba(0, 0, 0, 0.5);
+  animation: typePop3D 0.26s cubic-bezier(0.22, 1.15, 0.36, 1) forwards;
+  animation-delay: var(--char-delay, 0ms);
+}
+
+.titulo-3d-digitando .char-space {
+  display: inline-block;
+  width: 0.34em;
+}
+
+.titulo-3d-digitando .cursor-3d {
+  display: inline-block;
+  width: 0.11em;
+  height: 0.85em;
+  margin-left: 0.12em;
+  border-radius: 3px;
+  background: #5cd4be;
+  box-shadow: 0 0 10px rgba(92, 212, 190, 0.65);
+  animation: blinkCursor3D 0.65s steps(2, start) infinite;
+}
+
+.titulo-3d-digitando .cursor-3d.is-done {
+  animation: none;
+  opacity: 0;
+}
+
+@keyframes typePop3D {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 8px, -18px) rotateX(-45deg) scale(0.85);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotateX(0deg) scale(1);
+  }
+}
+
+@keyframes blinkCursor3D {
+  0%, 49% {
+    opacity: 1;
+  }
+  50%, 100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fadeDownSubtitle {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .entrada-kicker-topo {
+    opacity: 1;
+    animation: none;
+  }
+  .titulo-3d-digitando .char-3d {
+    opacity: 1;
+    transform: none;
+    animation: none;
+  }
+  .titulo-3d-digitando .cursor-3d {
+    display: none;
+  }
 }
 
 .entrada-box {

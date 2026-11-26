@@ -13,6 +13,7 @@
    + Cores dinâmicas conforme a Categoria Principal de Afinidade de Nen
    + Interatividade do painel de detalhes LGPD no rodapé do criador
    + Cálculo automático da tabela de Perícias (#tabela-pericias)
+   + Animação 3D de digitação letra por letra no título (#entrada-titulo)
    Criador: Lucas Ramalho Gavasso Trizote
    ========================================================================== */
 
@@ -195,6 +196,8 @@ const state = {
   nenCategory: "",
   scrollRafId: null,
   saveTimer: null,
+  typewriterTimerId: null,
+  typewriterPlayed: false,
   isSaving: false,
   isDeleting: false,
   lastSavedSnapshot: "",
@@ -225,6 +228,67 @@ const state = {
   activeNotice: null,
   noticeExpiryTimer: null
 };
+
+/* --------------------------------------------------------------------------
+   Animação 3D de Digitação Letra por Letra no Título de Entrada
+   -------------------------------------------------------------------------- */
+function initTitulo3DDigitando(forceReplay = false) {
+  const tituloEl = document.getElementById("entrada-titulo");
+  if (!tituloEl) return;
+
+  if (!forceReplay && state.typewriterPlayed && tituloEl.dataset.typewriterDone === "1") {
+    return;
+  }
+
+  if (state.typewriterTimerId !== null) {
+    clearTimeout(state.typewriterTimerId);
+    state.typewriterTimerId = null;
+  }
+
+  const textoOriginal = sanitizeSingleLine(
+    tituloEl.getAttribute("aria-label") || tituloEl.textContent || "Ordem de Arkan",
+    80
+  );
+  if (!textoOriginal) return;
+
+  state.typewriterPlayed = true;
+  tituloEl.dataset.typewriterDone = "1";
+  tituloEl.classList.add("titulo-3d-digitando");
+  tituloEl.setAttribute("aria-label", textoOriginal);
+
+  const fragment = document.createDocumentFragment();
+  const atrasoPorLetraMs = 32;
+  const atrasoInicialMs = 80;
+
+  const cursor = document.createElement("span");
+  cursor.className = "cursor-3d";
+  cursor.setAttribute("aria-hidden", "true");
+
+  Array.from(textoOriginal).forEach((caractere, index) => {
+    const span = document.createElement("span");
+
+    if (caractere === " ") {
+      span.className = "char-space";
+      span.textContent = "\u00A0";
+    } else {
+      span.className = "char-3d";
+      span.textContent = caractere;
+      span.style.setProperty("--char-delay", `${atrasoInicialMs + index * atrasoPorLetraMs}ms`);
+    }
+
+    span.setAttribute("aria-hidden", "true");
+    fragment.appendChild(span);
+  });
+
+  fragment.appendChild(cursor);
+  tituloEl.replaceChildren(fragment);
+
+  const tempoTotalMs = atrasoInicialMs + textoOriginal.length * atrasoPorLetraMs + 320;
+  state.typewriterTimerId = window.setTimeout(() => {
+    state.typewriterTimerId = null;
+    cursor.classList.add("is-done");
+  }, tempoTotalMs);
+}
 
 /* --------------------------------------------------------------------------
    Defesa contra Prototype Pollution, XSS, Faixa Inválida e Console Guard
@@ -2384,7 +2448,7 @@ async function handleAdminClearNotice(event) {
     }
 
     const existingFields =
-      snap.data() && snap.data().fields && typeof snap.data().fields === "object"
+      snap.exists() && snap.data() && snap.data().fields && typeof snap.data().fields === "object"
         ? snap.data().fields
         : createSafeRecord();
 
@@ -2693,6 +2757,8 @@ function updateScreenAccess() {
     window.requestAnimationFrame(() => {
       syncActiveSectionOnScroll();
     });
+  } else {
+    initTitulo3DDigitando(false);
   }
 }
 
@@ -3375,6 +3441,7 @@ async function handleLogout(event) {
   }
   updateAuthUI();
   updateScreenAccess();
+  initTitulo3DDigitando(true);
   setEntradaStatus("Você saiu da sessão. Escolha como deseja entrar novamente.");
 }
 
@@ -3421,6 +3488,7 @@ async function handleDeleteAccount(event) {
 
     updateAuthUI();
     updateScreenAccess();
+    initTitulo3DDigitando(true);
     setEntradaStatus("Conta e ficha excluídas permanentemente do Firebase.");
   } catch (err) {
     if (err && err.code === "auth/requires-recent-login") {
@@ -3652,6 +3720,7 @@ function bindEvents() {
       clearAuthSensitiveInputs();
       updateAuthUI();
       updateScreenAccess();
+      initTitulo3DDigitando(true);
       setEntradaStatus("Entre com sua conta Firebase para salvar na nuvem.");
     });
   }
@@ -3745,15 +3814,79 @@ function bindEvents() {
 
   const mainEl = document.querySelector("main.container");
   if (mainEl) {
-    const handleFieldUpdate = (event) => {
-      if (event.target && event.target.closest("#login-firebase")) return;
-      if (isInspectionReadOnlyActive()) return;
-      recalculateSkillsTable();
-      syncAdminQuickInputsFromSheet();
+    mainEl.addEventListener("input", (event) => {
+      const target = event.target;
+      if (!target || target.closest("#login-firebase")) return;
+      if (isInspectionReadOnlyActive()) {
+        event.preventDefault();
+        return;
+      }
+
+      if (target.id === "categoria-principal-nen") {
+        const selectedOptionText =
+          target.options && target.selectedIndex >= 0
+            ? target.options[target.selectedIndex].textContent || ""
+            : "";
+        applyNenCategoryTheme(target.value || selectedOptionText);
+      }
+
+      if (
+        target.closest("#tabela-pericias") ||
+        target.id === "attr-agi" ||
+        target.id === "attr-for" ||
+        target.id === "attr-ca" ||
+        target.id === "attr-int" ||
+        target.id === "attr-vig"
+      ) {
+        recalculateSkillsTable();
+      }
+
+      if (target.id === "nv-val" || target.id === "rank-val" || target.id === "espacos-max") {
+        syncAdminQuickInputsFromSheet();
+        if (state.adminActiveCommand === "/stats") {
+          renderAdminCommandFunctionsBelow();
+        }
+      }
+
       scheduleAutoSave();
-    };
-    mainEl.addEventListener("input", handleFieldUpdate);
-    mainEl.addEventListener("change", handleFieldUpdate);
+    });
+
+    mainEl.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!target || target.closest("#login-firebase")) return;
+      if (isInspectionReadOnlyActive()) {
+        event.preventDefault();
+        return;
+      }
+
+      if (target.id === "categoria-principal-nen") {
+        const selectedOptionText =
+          target.options && target.selectedIndex >= 0
+            ? target.options[target.selectedIndex].textContent || ""
+            : "";
+        applyNenCategoryTheme(target.value || selectedOptionText);
+      }
+
+      if (
+        target.closest("#tabela-pericias") ||
+        target.id === "attr-agi" ||
+        target.id === "attr-for" ||
+        target.id === "attr-ca" ||
+        target.id === "attr-int" ||
+        target.id === "attr-vig"
+      ) {
+        recalculateSkillsTable();
+      }
+
+      if (target.id === "nv-val" || target.id === "rank-val" || target.id === "espacos-max") {
+        syncAdminQuickInputsFromSheet();
+        if (state.adminActiveCommand === "/stats") {
+          renderAdminCommandFunctionsBelow();
+        }
+      }
+
+      scheduleAutoSave();
+    });
   }
 }
 
@@ -3761,6 +3894,8 @@ document.addEventListener("DOMContentLoaded", () => {
   initConsoleSecurityGuard();
   hardenExternalLinks();
   initLgpdBanner();
+  bindEvents();
+  setActiveSectionIndicator("dados-agente");
 
   const localData = loadLocalData();
   if (localData) {
@@ -3768,13 +3903,10 @@ document.addEventListener("DOMContentLoaded", () => {
   } else {
     recalculateSkillsTable();
     syncNenCategoryFromSelect();
-    syncAdminQuickInputsFromSheet();
     captureBaselineFields(collectSheetData().fields);
   }
 
-  setActiveSectionIndicator("dados-agente");
   updateAuthUI();
   updateScreenAccess();
-  bindEvents();
   initFirebase();
 });
