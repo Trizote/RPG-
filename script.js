@@ -447,6 +447,33 @@ function clearAuthSensitiveInputs() {
   updatePasswordVisibilityUI();
 }
 
+function resetAdminSessionState() {
+  state.adminTargetUid = "";
+  state.adminDraftUid = "";
+  state.adminDraftTempAdminUid = "";
+  state.adminDraftRevokeAdminUid = "";
+  state.adminRecentUids = [];
+  state.adminReadOnly = false;
+  state.adminActiveCommand = "";
+  state.adminAllCommandsActive = false;
+  state.adminDraftNoticeText = "";
+  state.adminDraftNoticeIndefinite = false;
+  state.adminDraftTempAdminIndefinite = false;
+  state.tempAdminGrant = null;
+  state.activeNotice = null;
+  state.globalNotice = null;
+  state.activeAuditHistory = [];
+  state.masterUpdateNotice = null;
+  state.masterReleaseNotice = null;
+  state.autoSyncDoneForSession = false;
+  scheduleNoticeExpiryCheck();
+  scheduleTempAdminExpiryCheck();
+  saveAdminTargetUidToStorage("");
+
+  const promptInput = document.getElementById("admin-prompt-input");
+  if (promptInput) promptInput.value = "";
+}
+
 function initConsoleSecurityGuard() {
   try {
     const warnStyle = "color: #ffd966; font-size: 13px; font-weight: bold;";
@@ -2083,13 +2110,10 @@ function renderAdminCommandFunctionsBelow() {
   }
 
   if ((cmd === "/admin" || cmd === "/removeradmin") && !isMasterAdmin()) {
-    box.hidden = false;
+    state.adminActiveCommand = "";
+    box.hidden = true;
     box.replaceChildren();
-    const denied = document.createElement("div");
-    denied.textContent =
-      "Apenas o administrador master pode conceder ou remover administradores temporários/indeterminados.";
-    denied.style.cssText = "font-size: 12px; color: #ff8a80; font-weight: 600;";
-    box.appendChild(denied);
+    setStatusBanner("Apenas o administrador master pode conceder ou remover administradores.", "warning");
     return;
   }
 
@@ -2964,6 +2988,13 @@ function updateAdminBarUI() {
   ensureAdminBarElement();
   const activeBar = document.getElementById("admin-uid-bar");
   const activeBadge = document.getElementById("admin-target-status");
+  const promptInput = document.getElementById("admin-prompt-input");
+
+  if (promptInput) {
+    promptInput.placeholder = isMasterAdmin()
+      ? "Digite um comando (/admin <UID> [min|indeterminado], /auditoria, /equipe, /removeradmin <UID>)..."
+      : "Digite um comando (/auditoria, /uid <UID>, /equipe, /consulta, /rolagens, /recompensa, /combate)...";
+  }
 
   if (activeBar) activeBar.hidden = false;
   if (activeBadge) {
@@ -3110,6 +3141,12 @@ function ensureAdminBarElement() {
 
   promptInput.addEventListener("input", () => {
     const resolved = resolveCommandNameFromInput(promptInput.value);
+    if ((resolved === "/admin" || resolved === "/removeradmin") && !isMasterAdmin()) {
+      state.adminActiveCommand = "";
+      renderActiveCommandsStrip();
+      renderAdminCommandFunctionsBelow();
+      return;
+    }
     state.adminActiveCommand = resolved;
     if (resolved === "/todos" || resolved === "/todosurgente") {
       state.adminDraftNoticeTargetMode = "all";
@@ -3294,18 +3331,22 @@ async function handleAdminPromptSubmit(event) {
 
   const parts = raw.split(/\s+/);
   const cmd = resolveCommandNameFromInput(parts[0]);
+
+  if ((cmd === "/admin" || cmd === "/removeradmin") && !isMasterAdmin()) {
+    state.adminActiveCommand = "";
+    setStatusBanner(
+      "Administrador temporário não tem permissão para adicionar ou remover administradores.",
+      "error"
+    );
+    renderActiveCommandsStrip();
+    renderAdminCommandFunctionsBelow();
+    return;
+  }
+
   state.adminActiveCommand = cmd;
   renderActiveCommandsStrip();
 
   if (cmd === "/admin") {
-    if (!isMasterAdmin()) {
-      setStatusBanner(
-        "Administrador temporário não tem permissão para adicionar ou remover administradores.",
-        "error"
-      );
-      renderAdminCommandFunctionsBelow();
-      return;
-    }
     if (parts[1]) {
       const uidArg = sanitizeSingleLine(parts[1], 128);
       const rawDur = parts[2];
@@ -3325,14 +3366,6 @@ async function handleAdminPromptSubmit(event) {
   }
 
   if (cmd === "/removeradmin") {
-    if (!isMasterAdmin()) {
-      setStatusBanner(
-        "Apenas o administrador principal pode remover administradores temporários ou indeterminados.",
-        "error"
-      );
-      renderAdminCommandFunctionsBelow();
-      return;
-    }
     if (parts[1]) {
       state.adminDraftRevokeAdminUid = parts[1];
       await handleAdminRevokeTempRole(parts[1]);
@@ -4149,16 +4182,8 @@ function updateScreenAccess() {
 
 function enterOfflineTemporaryMode() {
   stopRealtimeCampaignMonitor();
+  resetAdminSessionState();
   state.offlineMode = true;
-  state.activeNotice = null;
-  state.globalNotice = null;
-  state.tempAdminGrant = null;
-  state.activeAuditHistory = [];
-  state.adminDraftNoticeIndefinite = false;
-  state.adminDraftTempAdminIndefinite = false;
-  state.masterUpdateNotice = null;
-  state.masterReleaseNotice = null;
-  scheduleTempAdminExpiryCheck();
   state.lastSavedSnapshot = "";
   clearAuthSensitiveInputs();
   setEntradaStatus("");
@@ -4611,65 +4636,34 @@ async function initFirebase() {
 
     authMod.onAuthStateChanged(state.auth, async (user) => {
       stopRealtimeCampaignMonitor();
+      resetAdminSessionState();
       state.user = user || null;
+
       if (user) {
         state.offlineMode = false;
         if (user.uid === ADMIN_UID) {
-          state.tempAdminGrant = null;
-          scheduleTempAdminExpiryCheck();
           state.adminTargetUid = loadAdminTargetUidFromStorage();
           state.adminDraftUid = state.adminTargetUid;
           state.adminRecentUids = loadRecentAdminUidsFromStorage();
           if (state.adminTargetUid) recordRecentAdminUid(state.adminTargetUid);
         } else {
-          state.masterUpdateNotice = null;
-          state.masterReleaseNotice = null;
-          state.autoSyncDoneForSession = false;
-          state.adminTargetUid = "";
-          state.adminDraftUid = "";
-          state.adminRecentUids = [];
-          state.adminReadOnly = false;
-          state.adminActiveCommand = "";
-          state.adminAllCommandsActive = false;
-          state.adminDraftNoticeIndefinite = false;
-          state.adminDraftTempAdminIndefinite = false;
-          saveAdminTargetUidToStorage("");
-
-          // Lê imediatamente a própria ficha antes de renderizar o Painel do Mestre
           try {
             const ownSnap = await firestoreMod.getDoc(
               firestoreMod.doc(state.db, FIRESTORE_COLLECTION, user.uid)
             );
-            if (ownSnap.exists() && ownSnap.data()?.fields) {
-              state.tempAdminGrant = parseTempAdminGrantFromFields(ownSnap.data().fields, user.uid);
-              scheduleTempAdminExpiryCheck();
-            }
+            state.tempAdminGrant =
+              ownSnap.exists() && ownSnap.data()?.fields
+                ? parseTempAdminGrantFromFields(ownSnap.data().fields, user.uid)
+                : null;
+            scheduleTempAdminExpiryCheck();
           } catch {
-            // Se falhar aqui, loadFromFirestore tentará novamente em seguida
+            state.tempAdminGrant = null;
           }
         }
         clearAuthSensitiveInputs();
         setEntradaStatus("");
-      } else {
-        state.masterUpdateNotice = null;
-        state.masterReleaseNotice = null;
-        state.autoSyncDoneForSession = false;
-        state.adminTargetUid = "";
-        state.adminDraftUid = "";
-        state.adminRecentUids = [];
-        state.adminReadOnly = false;
-        state.adminActiveCommand = "";
-        state.adminAllCommandsActive = false;
-        state.adminDraftNoticeIndefinite = false;
-        state.adminDraftTempAdminIndefinite = false;
-        state.activeNotice = null;
-        state.globalNotice = null;
-        state.tempAdminGrant = null;
-        state.activeAuditHistory = [];
-        scheduleNoticeExpiryCheck();
-        scheduleTempAdminExpiryCheck();
-        saveAdminTargetUidToStorage("");
       }
+
       updateAuthUI();
       updateScreenAccess();
 
@@ -4914,25 +4908,8 @@ async function handleAuthSubmit(event) {
 async function handleLogout(event) {
   if (event && event.isTrusted === false) return;
   stopRealtimeCampaignMonitor();
+  resetAdminSessionState();
   state.offlineMode = false;
-  state.adminTargetUid = "";
-  state.adminDraftUid = "";
-  state.adminRecentUids = [];
-  state.adminReadOnly = false;
-  state.adminActiveCommand = "";
-  state.adminAllCommandsActive = false;
-  state.adminDraftNoticeIndefinite = false;
-  state.adminDraftTempAdminIndefinite = false;
-  state.activeNotice = null;
-  state.globalNotice = null;
-  state.tempAdminGrant = null;
-  state.activeAuditHistory = [];
-  state.masterUpdateNotice = null;
-  state.masterReleaseNotice = null;
-  state.autoSyncDoneForSession = false;
-  scheduleNoticeExpiryCheck();
-  scheduleTempAdminExpiryCheck();
-  saveAdminTargetUidToStorage("");
   state.lastSavedSnapshot = "";
   clearAuthSensitiveInputs();
 
@@ -4974,25 +4951,8 @@ async function handleDeleteAccount(event) {
     await deleteUser(currentUser);
     clearLocalData();
     clearAuthSensitiveInputs();
+    resetAdminSessionState();
     state.offlineMode = false;
-    state.adminTargetUid = "";
-    state.adminDraftUid = "";
-    state.adminRecentUids = [];
-    state.adminReadOnly = false;
-    state.adminActiveCommand = "";
-    state.adminAllCommandsActive = false;
-    state.adminDraftNoticeIndefinite = false;
-    state.adminDraftTempAdminIndefinite = false;
-    state.activeNotice = null;
-    state.globalNotice = null;
-    state.tempAdminGrant = null;
-    state.activeAuditHistory = [];
-    state.masterUpdateNotice = null;
-    state.masterReleaseNotice = null;
-    state.autoSyncDoneForSession = false;
-    scheduleNoticeExpiryCheck();
-    scheduleTempAdminExpiryCheck();
-    saveAdminTargetUidToStorage("");
     state.lastSavedSnapshot = "";
 
     const confirmBox = document.getElementById("auth-delete-confirm-box");
