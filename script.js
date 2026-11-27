@@ -7,8 +7,9 @@
    4. Cálculo de Perícias e Tema Dinâmico de Nen
    5. Privacidade (LGPD) e Navegação por Seção
    6. Coleta, Normalização e Persistência Local/Nuvem
-   7. Autenticação Firebase e Exclusão de Ficha/Conta
-   8. Interface, Banners e Inicialização
+   7. Autenticação Firebase, Permissão Admin e Exclusão de Ficha/Conta
+   8. Comandos do Administrador (1 comando = 1 função específica)
+   9. Interface, Banners e Inicialização
    ========================================================================== */
 
 "use strict";
@@ -32,14 +33,18 @@ const STORAGE_KEYS = Object.freeze({
 
 const FORBIDDEN_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 const FIRESTORE_COLLECTION = "fichas_ordem_arkan";
+const FIRESTORE_USERS_COLLECTION = "usuarios";
 const FIREBASE_SDK_VERSION = "10.14.1";
 const MIN_CLOUD_SAVE_INTERVAL_MS = 1200;
 const AUTO_SAVE_DEBOUNCE_MS = 750;
 
+// Opcional: adicione e-mails em minúsculo se quiser liberar admin por e-mail além do Firestore `usuarios/{uid}`
+const ADMIN_ALLOWED_EMAILS = Object.freeze([]);
+
 const LOGIN_TYPEWRITER_CONFIG = Object.freeze({
   defaultTitle: "Ordem de Arkan",
   initialDelayMs: 140,
-  stepDelayMs: 95, // Ritmo moderado: nem muito rápido, nem muito lento
+  stepDelayMs: 95,
   letterAnimMs: 340,
   cursorFinishBufferMs: 420
 });
@@ -49,7 +54,8 @@ const TRACKED_SECTIONS = Object.freeze([
   { id: "equipamentos-habilidades", label: "Equipamentos e Habilidades" },
   { id: "historico", label: "Histórico" },
   { id: "guilda", label: "Guilda" },
-  { id: "privacidade-lgpd", label: "Privacidade (LGPD)" }
+  { id: "privacidade-lgpd", label: "Privacidade (LGPD)" },
+  { id: "admin-painel", label: "Admin" }
 ]);
 
 const NEN_CATEGORIES_MAP = Object.freeze({
@@ -59,6 +65,15 @@ const NEN_CATEGORIES_MAP = Object.freeze({
   materializacao: "materializacao",
   manipulacao: "manipulacao",
   especializacao: "especializacao"
+});
+
+const NEN_SELECT_LABELS = Object.freeze({
+  reforco: "Reforço",
+  emissao: "Emissão",
+  transformacao: "Transformação",
+  materializacao: "Materialização",
+  manipulacao: "Manipulação",
+  especializacao: "Especialização"
 });
 
 const SKILL_GRADE_BONUS = Object.freeze({
@@ -99,6 +114,7 @@ const NUMERIC_BOUNDS = Object.freeze({
 
 const state = {
   user: null,
+  isAdmin: false,
   offlineMode: false,
   firebaseReady: false,
   auth: null,
@@ -450,6 +466,19 @@ function setActiveSectionIndicator(sectionId) {
   });
 }
 
+function navigateToSection(sectionId) {
+  const valid = TRACKED_SECTIONS.find((sec) => sec.id === sectionId);
+  if (!valid) return false;
+  if (valid.id === "admin-painel" && !state.isAdmin) return false;
+
+  const targetEl = document.getElementById(valid.id);
+  if (!targetEl || targetEl.hidden) return false;
+
+  setActiveSectionIndicator(valid.id);
+  targetEl.scrollIntoView({ behavior: "smooth", block: "start" });
+  return true;
+}
+
 function resolveCurrentSectionByViewport() {
   const topoEl = document.querySelector(".topo");
   const topOffset = topoEl ? topoEl.getBoundingClientRect().height : 90;
@@ -461,8 +490,10 @@ function resolveCurrentSectionByViewport() {
 
   for (let i = 0; i < TRACKED_SECTIONS.length; i += 1) {
     const secInfo = TRACKED_SECTIONS[i];
+    if (secInfo.id === "admin-painel" && !state.isAdmin) continue;
+
     const secEl = document.getElementById(secInfo.id);
-    if (!secEl) continue;
+    if (!secEl || secEl.hidden) continue;
 
     const rect = secEl.getBoundingClientRect();
     const visibleTop = Math.max(rect.top, topOffset);
@@ -529,7 +560,7 @@ function collectSheetData() {
 
   const controls = mainEl.querySelectorAll("input, select, textarea");
   controls.forEach((ctrl, index) => {
-    if (!ctrl || ctrl.closest("#login-firebase")) return;
+    if (!ctrl || ctrl.closest("#login-firebase") || ctrl.closest("#admin-painel")) return;
     const key = buildFieldKey(ctrl, index);
     if (!isValidFieldKey(key)) return;
 
@@ -587,7 +618,7 @@ function applySheetData(data) {
 
   const controls = mainEl.querySelectorAll("input, select, textarea");
   controls.forEach((ctrl, index) => {
-    if (!ctrl || ctrl.closest("#login-firebase")) return;
+    if (!ctrl || ctrl.closest("#login-firebase") || ctrl.closest("#admin-painel")) return;
     const key = buildFieldKey(ctrl, index);
     if (!isValidFieldKey(key)) return;
     if (!Object.prototype.hasOwnProperty.call(data.fields, key)) return;
@@ -611,7 +642,7 @@ function resetSheetFieldsToDefault() {
 
   const controls = mainEl.querySelectorAll("input, select, textarea");
   controls.forEach((ctrl) => {
-    if (!ctrl || ctrl.closest("#login-firebase")) return;
+    if (!ctrl || ctrl.closest("#login-firebase") || ctrl.closest("#admin-painel")) return;
 
     if (ctrl.type === "checkbox") {
       ctrl.checked = false;
@@ -677,7 +708,7 @@ function clearLocalData() {
 }
 
 async function persistSheet(forceWrite = false) {
-  if (state.isSaving || state.isDeleting) return;
+  if (state.isSaving || state.isDeleting) return false;
   state.isSaving = true;
 
   try {
@@ -689,10 +720,10 @@ async function persistSheet(forceWrite = false) {
         "Modo offline/local: alterações não ficam salvas se você carregar a página novamente.",
         "warning"
       );
-      return;
+      return false;
     }
 
-    if (!forceWrite && currentSnapshot === state.lastSavedSnapshot) return;
+    if (!forceWrite && currentSnapshot === state.lastSavedSnapshot) return true;
 
     saveLocalData(payload);
 
@@ -700,21 +731,27 @@ async function persistSheet(forceWrite = false) {
       const elapsed = Date.now() - state.lastCloudWriteAt;
       if (!forceWrite && elapsed < MIN_CLOUD_SAVE_INTERVAL_MS) {
         scheduleAutoSave();
-        return;
+        return true;
       }
 
       const cloudPayload = buildSanitizedCloudPayload(payload);
       await saveToFirestore(state.user.uid, cloudPayload);
       state.lastSavedSnapshot = computeFieldsSnapshot(cloudPayload.fields);
       setStatusBanner("Ficha salva no banco de dados Firebase.", "success");
-    } else if (hasCookieConsent()) {
+      return true;
+    }
+
+    if (hasCookieConsent()) {
       state.lastSavedSnapshot = currentSnapshot;
       setStatusBanner("Alterações salvas localmente.", "info");
-    } else {
-      setStatusBanner("Aceite o banner LGPD para salvar localmente ou faça login no Firebase.", "info");
+      return true;
     }
+
+    setStatusBanner("Aceite o banner LGPD para salvar localmente ou faça login no Firebase.", "info");
+    return false;
   } catch {
     setStatusBanner("Erro ao salvar no Firebase. Confira as permissões do Firestore.", "error");
+    return false;
   } finally {
     state.isSaving = false;
   }
@@ -728,7 +765,7 @@ function scheduleAutoSave() {
 }
 
 /* --------------------------------------------------------------------------
-   7. Autenticação Firebase e Exclusão de Ficha/Conta
+   7. Autenticação Firebase, Permissão Admin e Exclusão de Ficha/Conta
    -------------------------------------------------------------------------- */
 function hasValidFirebaseConfig(cfg) {
   if (!cfg || typeof cfg !== "object") return false;
@@ -772,6 +809,41 @@ function clearAuthSensitiveInputs() {
   updatePasswordVisibilityUI();
 }
 
+async function resolveAdminPermission(user) {
+  if (!user || state.offlineMode) return false;
+
+  const emailLower = sanitizeSingleLine(user.email || "", 160).toLowerCase();
+  if (emailLower && ADMIN_ALLOWED_EMAILS.includes(emailLower)) {
+    return true;
+  }
+
+  if (!state.firebaseReady || !state.db || !user.uid) return false;
+
+  try {
+    const { doc, getDoc } = state.firebaseModules.firestoreMod;
+    const snap = await getDoc(doc(state.db, FIRESTORE_USERS_COLLECTION, user.uid));
+    if (!snap.exists()) return false;
+    const profile = snap.data() || {};
+    const role = String(profile.role || profile.cargo || "").trim().toLowerCase();
+    return profile.isAdmin === true || role === "admin" || role === "administrador";
+  } catch {
+    return false;
+  }
+}
+
+function updateAdminVisibilityUI() {
+  const adminTab = document.getElementById("aba-admin");
+  const adminSection = document.getElementById("admin-painel");
+  const allowed = Boolean(state.user) && !state.offlineMode && Boolean(state.isAdmin);
+
+  if (adminTab) adminTab.hidden = !allowed;
+  if (adminSection) adminSection.hidden = !allowed;
+
+  if (!allowed && state.activeSectionId === "admin-painel") {
+    setActiveSectionIndicator("dados-agente");
+  }
+}
+
 async function initFirebase() {
   if (!hasValidFirebaseConfig(FIREBASE_CONFIG)) {
     setEntradaStatus("Firebase não configurado. Use a opção Entrar offline/local.");
@@ -798,9 +870,13 @@ async function initFirebase() {
         state.offlineMode = false;
         clearAuthSensitiveInputs();
         setEntradaStatus("");
+        state.isAdmin = await resolveAdminPermission(user);
+      } else {
+        state.isAdmin = false;
       }
 
       updateAuthUI();
+      updateAdminVisibilityUI();
       updateScreenAccess();
 
       if (user && !state.isDeleting) {
@@ -821,7 +897,7 @@ async function initFirebase() {
 }
 
 async function loadFromFirestore(uid) {
-  if (!state.firebaseReady || !state.db || !uid) return;
+  if (!state.firebaseReady || !state.db || !uid) return false;
   const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
 
   try {
@@ -833,7 +909,10 @@ async function loadFromFirestore(uid) {
       applySheetData(cloudData);
       saveLocalData(cloudData);
       setStatusBanner("Ficha carregada do banco de dados Firebase.", "success");
-    } else {
+      return true;
+    }
+
+    if (uid === state.user?.uid) {
       resetSheetFieldsToDefault();
       const initialData = buildSanitizedCloudPayload();
       state.lastCloudWriteAt = Date.now();
@@ -841,9 +920,13 @@ async function loadFromFirestore(uid) {
       state.lastSavedSnapshot = computeFieldsSnapshot(initialData.fields);
       saveLocalData(initialData);
       setStatusBanner("Nova ficha criada na sua conta do Firebase.", "success");
+      return true;
     }
+
+    return false;
   } catch {
     setStatusBanner("Erro ao ler dados do Firebase. Verifique as regras do Firestore.", "error");
+    return false;
   }
 }
 
@@ -924,6 +1007,7 @@ async function handleAuthSubmit(event) {
 async function handleLogout(event) {
   if (event && event.isTrusted === false) return;
   state.offlineMode = false;
+  state.isAdmin = false;
   state.lastSavedSnapshot = "";
   clearAuthSensitiveInputs();
 
@@ -938,6 +1022,7 @@ async function handleLogout(event) {
   }
 
   updateAuthUI();
+  updateAdminVisibilityUI();
   updateScreenAccess();
   setEntradaStatus("Você saiu da sessão. Escolha como deseja entrar novamente.");
 }
@@ -968,12 +1053,14 @@ async function handleDeleteAccount(event) {
     clearLocalData();
     clearAuthSensitiveInputs();
     state.offlineMode = false;
+    state.isAdmin = false;
     state.lastSavedSnapshot = "";
 
     const confirmBox = document.getElementById("auth-delete-confirm-box");
     if (confirmBox) confirmBox.hidden = true;
 
     updateAuthUI();
+    updateAdminVisibilityUI();
     updateScreenAccess();
     setEntradaStatus("Conta e ficha excluídas permanentemente do Firebase.");
   } catch (err) {
@@ -988,7 +1075,164 @@ async function handleDeleteAccount(event) {
 }
 
 /* --------------------------------------------------------------------------
-   8. Interface, Banners e Inicialização
+   8. Comandos do Administrador (1 comando = 1 função específica)
+   -------------------------------------------------------------------------- */
+function setAdminConsoleOutput(text) {
+  const outEl = document.getElementById("admin-cmd-output");
+  if (!outEl) return;
+  outEl.textContent = sanitizeText(String(text ?? ""), 2500);
+}
+
+function cmdAdminAjuda() {
+  return [
+    "Comandos disponíveis (cada comando executa 1 função específica):",
+    "• ajuda              -> Lista todos os comandos disponíveis.",
+    "• limpar             -> Limpa o texto exibido no console admin.",
+    "• status             -> Exibe e-mail, UID, modo, categoria de Nen e seção ativa.",
+    "• salvar             -> Salva a ficha atual no armazenamento/nuvem.",
+    "• resetar            -> Restaura os campos da ficha para os valores padrão.",
+    "• nen <categoria>    -> Aplica reforco | emissao | transformacao | materializacao | manipulacao | especializacao.",
+    "• rank <E..SSS>      -> Define o Rank do agente no campo Rank.",
+    "• xp <número>        -> Soma XP ao campo XP Atual da ficha.",
+    "• ir <secao>         -> Rola até dados-agente | equipamentos-habilidades | historico | guilda | privacidade-lgpd | admin-painel.",
+    "• buscar_ficha <uid> -> Carrega na ficha o documento fichas_ordem_arkan/<uid> do Firestore."
+  ].join("\n");
+}
+
+function cmdAdminLimpar() {
+  setAdminConsoleOutput("Console limpo.");
+  return null;
+}
+
+function cmdAdminStatus() {
+  const nomeVal = sanitizeSingleLine(document.getElementById("nome")?.value || "(sem nome)", 80);
+  const rankVal = sanitizeSingleLine(document.getElementById("rank-val")?.value || "E", 10);
+  const nenLabel = state.nenCategory ? NEN_SELECT_LABELS[state.nenCategory] : "Nenhuma";
+
+  return [
+    `Usuário: ${state.user ? state.user.email || "(sem e-mail)" : "Offline/Local"}`,
+    `UID: ${state.user ? state.user.uid : "N/A"}`,
+    `Agente: ${nomeVal} | Rank: ${rankVal} | Nen: ${nenLabel}`,
+    `Seção atual: ${state.activeSectionId}`
+  ].join("\n");
+}
+
+async function cmdAdminSalvar() {
+  const ok = await persistSheet(true);
+  return ok ? "Ficha salva com sucesso." : "Não foi possível salvar no momento.";
+}
+
+function cmdAdminResetar() {
+  resetSheetFieldsToDefault();
+  scheduleAutoSave();
+  return "Campos da ficha restaurados para o padrão inicial.";
+}
+
+function cmdAdminDefinirNen(args) {
+  const rawArg = args.join(" ");
+  const key = normalizeNenCategoryKey(rawArg);
+  if (!key) {
+    return "Categoria inválida. Use: reforco, emissao, transformacao, materializacao, manipulacao ou especializacao.";
+  }
+
+  const selectEl = document.getElementById("categoria-principal-nen");
+  if (selectEl) {
+    selectEl.value = NEN_SELECT_LABELS[key];
+  }
+  applyNenCategoryTheme(key);
+  scheduleAutoSave();
+  return `Categoria de Nen definida para: ${NEN_SELECT_LABELS[key]}.`;
+}
+
+function cmdAdminDefinirRank(args) {
+  const rawRank = args[0] || "";
+  if (!rawRank) return "Informe o Rank. Ex: rank A";
+
+  const rankEl = document.getElementById("rank-val");
+  const normalized = normalizeRankValue(rawRank);
+  if (rankEl) rankEl.value = normalized;
+  scheduleAutoSave();
+  return `Rank atualizado para: ${normalized}.`;
+}
+
+function cmdAdminAdicionarXp(args) {
+  const delta = Number(String(args[0] ?? "").replace(",", "."));
+  if (!Number.isFinite(delta)) return "Informe um número válido. Ex: xp 150";
+
+  const xpAtualEl = document.getElementById("xp-atual-val");
+  if (!xpAtualEl) return "Campo XP Atual não encontrado.";
+
+  const current = Number(String(xpAtualEl.value || "0").replace(",", ".")) || 0;
+  const next = Math.trunc(current + delta);
+  xpAtualEl.value = String(next);
+  scheduleAutoSave();
+  return `XP Atual alterado de ${Math.trunc(current)} para ${next}.`;
+}
+
+function cmdAdminIrParaSecao(args) {
+  const targetId = sanitizeSingleLine(args[0] || "", 40).toLowerCase();
+  if (!targetId) return "Informe a seção. Ex: ir guilda";
+
+  const moved = navigateToSection(targetId);
+  return moved ? `Navegado para a seção: ${targetId}.` : `Seção não encontrada ou indisponível: ${targetId}.`;
+}
+
+async function cmdAdminBuscarFicha(args) {
+  const targetUid = sanitizeSingleLine(args[0] || "", 128);
+  if (!targetUid) return "Informe o UID da ficha. Ex: buscar_ficha <uid>";
+  if (!state.firebaseReady || !state.db) return "Firestore não está conectado.";
+
+  const ok = await loadFromFirestore(targetUid);
+  return ok
+    ? `Ficha do UID "${targetUid}" carregada no formulário.`
+    : `Nenhuma ficha encontrada para o UID "${targetUid}".`;
+}
+
+const ADMIN_COMMAND_HANDLERS = Object.freeze({
+  ajuda: cmdAdminAjuda,
+  help: cmdAdminAjuda,
+  limpar: cmdAdminLimpar,
+  clear: cmdAdminLimpar,
+  status: cmdAdminStatus,
+  salvar: cmdAdminSalvar,
+  resetar: cmdAdminResetar,
+  nen: cmdAdminDefinirNen,
+  rank: cmdAdminDefinirRank,
+  xp: cmdAdminAdicionarXp,
+  ir: cmdAdminIrParaSecao,
+  buscar_ficha: cmdAdminBuscarFicha
+});
+
+async function executeAdminCommand(rawInput) {
+  if (!state.isAdmin || !state.user || state.offlineMode) {
+    setAdminConsoleOutput("Acesso negado: função restrita a administradores autenticados.");
+    return;
+  }
+
+  const cleaned = sanitizeSingleLine(rawInput || "", 240);
+  if (!cleaned) {
+    setAdminConsoleOutput('Digite um comando. Ex: "ajuda".');
+    return;
+  }
+
+  const parts = cleaned.split(/\s+/);
+  const cmdName = (parts[0] || "").toLowerCase();
+  const cmdArgs = parts.slice(1);
+
+  if (!Object.prototype.hasOwnProperty.call(ADMIN_COMMAND_HANDLERS, cmdName)) {
+    setAdminConsoleOutput(`Comando desconhecido "${cmdName}". Digite "ajuda" para ver os comandos.`);
+    return;
+  }
+
+  const handler = ADMIN_COMMAND_HANDLERS[cmdName];
+  const result = await handler(cmdArgs);
+  if (typeof result === "string") {
+    setAdminConsoleOutput(result);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   9. Interface, Banners e Inicialização
    -------------------------------------------------------------------------- */
 function setStatusBanner(message, type = "info") {
   const banner = document.getElementById("status-banner");
@@ -1069,6 +1313,7 @@ function updateScreenAccess() {
   if (appFicha) appFicha.hidden = !hasSession;
 
   if (hasSession) {
+    updateAdminVisibilityUI();
     syncNenCategoryFromSelect();
     recalculateSkillsTable();
     window.requestAnimationFrame(() => syncActiveSectionOnScroll());
@@ -1079,10 +1324,12 @@ function updateScreenAccess() {
 
 function enterOfflineTemporaryMode() {
   state.offlineMode = true;
+  state.isAdmin = false;
   state.lastSavedSnapshot = "";
   clearAuthSensitiveInputs();
   setEntradaStatus("");
   updateAuthUI();
+  updateAdminVisibilityUI();
   updateScreenAccess();
   setStatusBanner(
     "Modo offline/local ativo: as informações não ficam salvas se você carregar a página novamente.",
@@ -1102,7 +1349,7 @@ function initLgpdBanner() {
 
 function handleSheetControlMutation(event) {
   const target = event.target;
-  if (!target || target.closest("#login-firebase")) return;
+  if (!target || target.closest("#login-firebase") || target.closest("#admin-painel")) return;
 
   if (target.id === "categoria-principal-nen") {
     const selectedOptionText =
@@ -1124,6 +1371,28 @@ function handleSheetControlMutation(event) {
   }
 
   scheduleAutoSave();
+}
+
+function bindAdminEvents() {
+  const cmdForm = document.getElementById("admin-cmd-form");
+  const cmdInput = document.getElementById("admin-cmd-input");
+
+  if (cmdForm && cmdInput) {
+    cmdForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const value = cmdInput.value;
+      cmdInput.value = "";
+      await executeAdminCommand(value);
+    });
+  }
+
+  const quickButtons = document.querySelectorAll("[data-admin-quick]");
+  quickButtons.forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const cmd = btn.getAttribute("data-admin-quick") || "";
+      await executeAdminCommand(cmd);
+    });
+  });
 }
 
 function bindEvents() {
@@ -1174,8 +1443,10 @@ function bindEvents() {
   if (irLoginNuvemBtn) {
     irLoginNuvemBtn.addEventListener("click", () => {
       state.offlineMode = false;
+      state.isAdmin = false;
       clearAuthSensitiveInputs();
       updateAuthUI();
+      updateAdminVisibilityUI();
       updateScreenAccess();
       setEntradaStatus("Entre com sua conta Firebase para salvar na nuvem.");
     });
@@ -1259,6 +1530,8 @@ function bindEvents() {
     mainEl.addEventListener("input", handleSheetControlMutation);
     mainEl.addEventListener("change", handleSheetControlMutation);
   }
+
+  bindAdminEvents();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -1267,6 +1540,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initLgpdBanner();
   bindEvents();
   setActiveSectionIndicator("dados-agente");
+  updateAdminVisibilityUI();
 
   const localData = loadLocalData();
   if (localData) {

@@ -469,6 +469,10 @@ body {
   transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
 }
 
+.aba-btn[hidden] {
+  display: none !important;
+}
+
 .aba-btn:hover {
   background-color: var(--ilha-primaria);
   border-color: var(--ilha-brilho);
@@ -501,6 +505,10 @@ body {
 .secao {
   margin-bottom: 48px;
   scroll-margin-top: 120px;
+}
+
+.secao[hidden] {
+  display: none !important;
 }
 
 .titulo-secao {

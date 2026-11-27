@@ -116,6 +116,7 @@
         <a href="#historico" class="aba-btn" data-secao-alvo="historico">Histórico</a>
         <a href="#guilda" class="aba-btn" data-secao-alvo="guilda">Guilda</a>
         <a href="#privacidade-lgpd" class="aba-btn" data-secao-alvo="privacidade-lgpd">Privacidade (LGPD)</a>
+        <a href="#admin-painel" id="aba-admin" class="aba-btn" data-secao-alvo="admin-painel" hidden>Admin</a>
         <button type="button" id="btn-save-sheet" class="aba-btn aba-btn-destaque">Salvar Ficha</button>
         <button type="button" id="btn-voltar-entrada" class="aba-btn">Trocar Acesso / Sair</button>
       </nav>
@@ -926,6 +927,45 @@
             (c) Usar aba anônima ou navegação privada;
             (d) Clicar em <strong>Excluir ficha</strong> ou <strong>Excluir conta</strong> e confirmar (o que apaga a ficha salva no Firebase e limpa os dados locais deste navegador).
           </p>
+        </div>
+      </section>
+
+      <!-- ==========================================
+           ABA ADMIN: COMANDOS DO ADMINISTRADOR
+      =========================================== -->
+      <section id="admin-painel" class="secao" hidden>
+        <h2 class="titulo-secao">Painel do Administrador</h2>
+
+        <div class="card">
+          <div class="card-header roxo">Console de Comandos Específicos</div>
+          <p class="texto-nen">
+            Cada comando executa uma função específica no sistema. Digite <strong>ajuda</strong> para listar os comandos disponíveis.
+          </p>
+
+          <form id="admin-cmd-form" class="senha-grupo" autocomplete="off">
+            <input
+              type="text"
+              id="admin-cmd-input"
+              placeholder="Ex: ajuda | status | nen reforco | rank A | xp 250 | ir guilda | buscar_ficha <uid>"
+              aria-label="Comando do administrador"
+            >
+            <button type="submit" id="admin-cmd-run-btn" class="btn-arkan btn-azul">Executar</button>
+          </form>
+
+          <div class="auth-acoes">
+            <button type="button" class="btn-arkan btn-roxo" data-admin-quick="ajuda">ajuda</button>
+            <button type="button" class="btn-arkan btn-azul" data-admin-quick="status">status</button>
+            <button type="button" class="btn-arkan btn-roxo" data-admin-quick="salvar">salvar</button>
+            <button type="button" class="btn-arkan btn-perigo" data-admin-quick="limpar">limpar</button>
+          </div>
+
+          <div
+            id="admin-cmd-output"
+            class="entrada-status"
+            role="log"
+            aria-live="polite"
+            style="margin-top: 14px; white-space: pre-line; font-family: monospace;"
+          >Console pronto. Digite "ajuda" e clique em Executar.</div>
         </div>
       </section>
 
