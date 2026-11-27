@@ -7,14 +7,12 @@
      Dinâmicas do Comando Abaixo, Todos os Comandos Ativos, Mensagem até 24h
      ou Tempo Indeterminado no Painel Mestre (Normal/Urgente) para UID ou
      TODOS os jogadores, Admin Temporário até 24h ou Tempo Indeterminado no
-     Painel Mestre (sem adicionar/remover admin), Comando /removeradmin para
-     revogar admin temporário/indeterminado, Funções do Painel do Mestre
-     (/equipe, /consulta, /rolagens, /recompensa, /combate, /auditoria),
-     Monitoramento em Tempo Real e Histórico de Auditoria Anti-Adulteração,
-     Bloqueio de Acesso à Ficha do Admin Master para outros usuários, Aviso de
-     Atualização 100% Funcional na Conta Master com Leitura Automática do que
-     foi Adicionado, Somente Leitura, UIDs Recentes, Ajuste Rápido, Modelos
-     Base, Diff, Backup JSON e Log
+     Painel Mestre (persistente ao recarregar via onSnapshot + cache seguro,
+     sem acesso a /admin ou /removeradmin), Comando /removeradmin para revogar,
+     Funções do Painel do Mestre (/equipe, /consulta, /rolagens, /recompensa,
+     /combate, /auditoria), Monitoramento em Tempo Real e Histórico de
+     Auditoria Anti-Adulteração, Bloqueio de Acesso à Ficha do Admin Master
+     para outros usuários, Aviso de Atualização 100% Funcional na Conta Master
    + Exclusão de ficha e exclusão de conta
    + Sincronização precisa das seções no topo conforme a rolagem
    + Cores dinâmicas conforme a Categoria Principal de Afinidade de Nen
@@ -40,6 +38,7 @@ const STORAGE_KEYS = Object.freeze({
   COOKIE_CONSENT: "ordem_de_arkan_lgpd_v1",
   ADMIN_TARGET_UID: "ordem_de_arkan_admin_target_uid_v1",
   ADMIN_RECENT_UIDS: "ordem_de_arkan_admin_recent_uids_v1",
+  TEMP_ADMIN_CACHE: "ordem_de_arkan_temp_admin_grant_v1",
   MASTER_SEEN_RELEASE: "ordem_de_arkan_master_seen_release_v1",
   MASTER_AUTO_SNAPSHOT: "ordem_de_arkan_master_auto_snapshot_v1"
 });
@@ -227,6 +226,7 @@ const state = {
   lastCloudWriteAt: 0,
   tempAdminGrant: null,
   tempAdminExpiryTimer: null,
+  ownGrantUnsubscribe: null,
   masterUpdateNotice: null,
   masterReleaseNotice: null,
   autoDetectedAdditions: null,
@@ -447,7 +447,42 @@ function clearAuthSensitiveInputs() {
   updatePasswordVisibilityUI();
 }
 
+function stopOwnGrantListener() {
+  if (typeof state.ownGrantUnsubscribe === "function") {
+    try {
+      state.ownGrantUnsubscribe();
+    } catch {
+      // Ignora erro ao encerrar listener
+    }
+    state.ownGrantUnsubscribe = null;
+  }
+}
+
+function saveTempAdminGrantToStorage(grantObj) {
+  try {
+    if (grantObj && grantObj.uid && grantObj.grantedBy === ADMIN_UID) {
+      localStorage.setItem(STORAGE_KEYS.TEMP_ADMIN_CACHE, JSON.stringify(grantObj));
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.TEMP_ADMIN_CACHE);
+    }
+  } catch {
+    // Ignora falha de storage
+  }
+}
+
+function loadTempAdminGrantFromStorage(expectedUid) {
+  if (!expectedUid || expectedUid === ADMIN_UID) return null;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.TEMP_ADMIN_CACHE);
+    if (!raw) return null;
+    return parseTempAdminGrantFromFields({ [TEMP_ADMIN_GRANT_FIELD_KEY]: raw }, expectedUid);
+  } catch {
+    return null;
+  }
+}
+
 function resetAdminSessionState() {
+  stopOwnGrantListener();
   state.adminTargetUid = "";
   state.adminDraftUid = "";
   state.adminDraftTempAdminUid = "";
@@ -593,7 +628,7 @@ function startRealtimeCampaignMonitor() {
         const data = change.doc.data() || {};
         const newFields = data.fields && typeof data.fields === "object" ? data.fields : {};
         const agentName = sanitizeSingleLine(
-          String(newFields["id:nome-agente"] || newFields["id:agente-nome"] || docId),
+          String(newFields["id:nome"] || newFields["id:nome-agente"] || newFields["id:agente-nome"] || docId),
           50
         );
 
@@ -637,6 +672,63 @@ function startRealtimeCampaignMonitor() {
     },
     () => {
       // Falha silenciosa caso escuta coletiva seja bloqueada
+    }
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Escuta em Tempo Real da Própria Conta (Persiste Admin Temporário ao Recarregar)
+   -------------------------------------------------------------------------- */
+function startOwnGrantRealtimeListener(uid) {
+  stopOwnGrantListener();
+  if (!uid || uid === ADMIN_UID || !state.firebaseReady || !state.db || !state.firebaseModules) return;
+
+  const { doc, onSnapshot } = state.firebaseModules.firestoreMod;
+  const ownRef = doc(state.db, FIRESTORE_COLLECTION, uid);
+
+  state.ownGrantUnsubscribe = onSnapshot(
+    ownRef,
+    (snap) => {
+      if (!state.user || state.user.uid !== uid) return;
+
+      const fields = snap.exists() && snap.data()?.fields && typeof snap.data().fields === "object"
+        ? snap.data().fields
+        : null;
+
+      const hadAdminBefore = Boolean(state.tempAdminGrant);
+      const parsedGrant = fields ? parseTempAdminGrantFromFields(fields, uid) : null;
+
+      state.tempAdminGrant = parsedGrant;
+      saveTempAdminGrantToStorage(parsedGrant);
+      scheduleTempAdminExpiryCheck();
+
+      if (fields) {
+        state.activeNotice = parseActiveNoticeFromFields(fields);
+        scheduleNoticeExpiryCheck();
+        renderPlayerNoticeBanner();
+      }
+
+      if (parsedGrant && !hadAdminBefore) {
+        state.adminRecentUids = loadRecentAdminUidsFromStorage();
+        startRealtimeCampaignMonitor();
+        setStatusBanner(
+          `Painel de Administrador Temporário ativado (${formatRemainingTimeLabel(parsedGrant.expiresAt, parsedGrant.indefinite)}).`,
+          "success"
+        );
+      } else if (!parsedGrant && hadAdminBefore) {
+        stopRealtimeCampaignMonitor();
+        state.adminTargetUid = "";
+        state.adminDraftUid = "";
+        state.adminActiveCommand = "";
+        state.adminAllCommandsActive = false;
+        saveAdminTargetUidToStorage("");
+        setStatusBanner("Permissão de administrador temporário encerrada.", "warning");
+      }
+
+      updateAdminBarUI();
+    },
+    () => {
+      // Mantém grant carregado do cache seguro caso ocorra falha momentânea de rede
     }
   );
 }
@@ -1275,6 +1367,7 @@ function scheduleTempAdminExpiryCheck() {
   const remainingMs = state.tempAdminGrant.expiresAt - Date.now();
   if (remainingMs <= 0) {
     state.tempAdminGrant = null;
+    saveTempAdminGrantToStorage(null);
     stopRealtimeCampaignMonitor();
     updateAdminBarUI();
     return;
@@ -1284,6 +1377,7 @@ function scheduleTempAdminExpiryCheck() {
     state.tempAdminExpiryTimer = null;
     if (state.tempAdminGrant && !state.tempAdminGrant.indefinite && Date.now() >= state.tempAdminGrant.expiresAt) {
       state.tempAdminGrant = null;
+      saveTempAdminGrantToStorage(null);
       stopRealtimeCampaignMonitor();
       if (state.adminActiveCommand === "/admin" || state.adminActiveCommand === "/removeradmin") {
         state.adminActiveCommand = "";
@@ -1307,6 +1401,7 @@ function hasActiveTempAdminRole() {
   }
   if (Date.now() >= (state.tempAdminGrant.expiresAt || 0)) {
     state.tempAdminGrant = null;
+    saveTempAdminGrantToStorage(null);
     return false;
   }
   return state.tempAdminGrant.uid === state.user.uid;
@@ -1701,6 +1796,7 @@ function getSheetFieldById(fieldId) {
 
 function getActiveAgentSummary() {
   const nome =
+    getSheetFieldById("nome") ||
     getSheetFieldById("nome-agente") ||
     getSheetFieldById("agente-nome") ||
     getActiveTargetUid() ||
@@ -1713,8 +1809,8 @@ function getActiveAgentSummary() {
     "0";
 
   const sanidade =
-    getSheetFieldById("sanidade-atual") ||
     getSheetFieldById("san-atual") ||
+    getSheetFieldById("sanidade-atual") ||
     getSheetFieldById("sanidade-val") ||
     "0";
 
@@ -1724,8 +1820,8 @@ function getActiveAgentSummary() {
     "0";
 
   const esforco =
-    getSheetFieldById("esforco-atual") ||
     getSheetFieldById("pe-atual") ||
+    getSheetFieldById("esforco-atual") ||
     getSheetFieldById("esforco-val") ||
     "0";
 
@@ -1800,7 +1896,7 @@ function appendRewardToTargetSheet(xpVal, coinsVal, itemText) {
   const safeCoins = Number.isFinite(coinsNum) ? Math.trunc(coinsNum) : 0;
 
   if (safeXp !== 0) {
-    const xpInput = document.getElementById("xp-val") || document.getElementById("guilda-xp");
+    const xpInput = document.getElementById("xp-atual-val") || document.getElementById("xp-val") || document.getElementById("guilda-xp");
     if (xpInput) {
       const currentXp = Number(String(xpInput.value || "0").replace(",", ".")) || 0;
       xpInput.value = String(Math.max(0, Math.trunc(currentXp) + safeXp));
@@ -1809,6 +1905,7 @@ function appendRewardToTargetSheet(xpVal, coinsVal, itemText) {
 
   if (safeCoins !== 0) {
     const coinsInput =
+      document.getElementById("guilda-moedas-total") ||
       document.getElementById("moedas-val") ||
       document.getElementById("dinheiro-val") ||
       document.getElementById("guilda-moedas");
@@ -1820,6 +1917,7 @@ function appendRewardToTargetSheet(xpVal, coinsVal, itemText) {
 
   if (cleanItem) {
     const invInput =
+      document.getElementById("anotacoes-gerais") ||
       document.getElementById("equipamentos-lista") ||
       document.getElementById("guilda-itens") ||
       document.getElementById("anotacoes-guilda");
@@ -2054,7 +2152,7 @@ function renderActiveCommandsStrip() {
   const header = document.createElement("div");
   header.textContent = isMasterAdmin()
     ? "Comandos ativos (clique para abrir cada função separada abaixo):"
-    : "Comandos ativos do painel do mestre (auditoria em tempo real ativa; ficha master privada e sem add/remover admin):";
+    : "Comandos ativos do painel do mestre (auditoria em tempo real ativa; ficha master privada):";
   header.style.cssText = "font-size: 12px; color: #ffd966; font-weight: 600; margin-bottom: 6px;";
   strip.appendChild(header);
 
@@ -2062,6 +2160,8 @@ function renderActiveCommandsStrip() {
   grid.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px;";
 
   getAvailableCommandsForCurrentUser().forEach((item) => {
+    if (item.masterOnly && !isMasterAdmin()) return;
+
     const btn = document.createElement("button");
     btn.type = "button";
     const isSelected = state.adminActiveCommand === item.cmd;
@@ -2077,6 +2177,7 @@ function renderActiveCommandsStrip() {
     ].join(";");
 
     btn.addEventListener("click", () => {
+      if (item.masterOnly && !isMasterAdmin()) return;
       const promptInput = document.getElementById("admin-prompt-input");
       if (promptInput) {
         promptInput.value = `${item.cmd} `;
@@ -2115,7 +2216,6 @@ function renderAdminCommandFunctionsBelow() {
     state.adminActiveCommand = "";
     box.hidden = true;
     box.replaceChildren();
-    setStatusBanner("Apenas o administrador master pode conceder ou remover administradores.", "warning");
     return;
   }
 
@@ -2967,6 +3067,7 @@ function renderAdminCommandFunctionsBelow() {
   const helpList = document.createElement("ul");
   helpList.style.cssText = "margin: 0; padding-left: 16px; font-size: 12px; color: #d6dee6;";
   getAvailableCommandsForCurrentUser().forEach((item) => {
+    if (item.masterOnly && !isMasterAdmin()) return;
     const li = document.createElement("li");
     li.textContent = `${item.syntax} — ${item.desc}`;
     li.style.marginBottom = "3px";
@@ -2995,7 +3096,7 @@ function updateAdminBarUI() {
   if (promptInput) {
     promptInput.placeholder = isMasterAdmin()
       ? "Digite um comando (/admin <UID> [min|indeterminado], /auditoria, /equipe, /removeradmin <UID>)..."
-      : "Digite um comando (/auditoria, /uid <UID>, /equipe, /consulta, /rolagens, /recompensa, /combate)...";
+      : "Digite um comando (/uid <UID>, /auditoria, /equipe, /consulta, /rolagens, /recompensa, /combate)...";
   }
 
   if (activeBar) activeBar.hidden = false;
@@ -3083,7 +3184,7 @@ function ensureAdminBarElement() {
   promptInput.id = "admin-prompt-input";
   promptInput.placeholder = isMasterAdmin()
     ? "Digite um comando (/admin <UID> [min|indeterminado], /auditoria, /equipe, /removeradmin <UID>)..."
-    : "Digite um comando (/auditoria, /uid <UID>, /equipe, /consulta, /rolagens, /recompensa, /combate)...";
+    : "Digite um comando (/uid <UID>, /auditoria, /equipe, /consulta, /rolagens, /recompensa, /combate)...";
   promptInput.autocomplete = "off";
   promptInput.spellcheck = false;
   promptInput.setAttribute("aria-label", "Prompt de comando do administrador");
@@ -3249,7 +3350,7 @@ async function handleAdminGrantTempRole(overrideData) {
     const code = err && typeof err.code === "string" ? err.code : "erro";
     setStatusBanner(
       code === "permission-denied"
-        ? "Permissão negada no Firestore ao conceder admin temporário (verifique firestore.rules)."
+        ? "Permissão negada no Firestore ao conceder admin temporário (publique as firestore.rules)."
         : `Erro (${code}) ao salvar admin temporário no Firestore.`,
       "error"
     );
@@ -3336,6 +3437,7 @@ async function handleAdminPromptSubmit(event) {
 
   if ((cmd === "/admin" || cmd === "/removeradmin") && !isMasterAdmin()) {
     state.adminActiveCommand = "";
+    if (input) input.value = "";
     setStatusBanner(
       "Administrador temporário não tem permissão para adicionar ou remover administradores.",
       "error"
@@ -4276,7 +4378,8 @@ function collectSheetData() {
     }
   }
 
-  if (state.tempAdminGrant) {
+  const activeTarget = getActiveTargetUid();
+  if (state.tempAdminGrant && (!activeTarget || activeTarget === state.tempAdminGrant.uid)) {
     if (state.tempAdminGrant.indefinite || state.tempAdminGrant.expiresAt === null) {
       fields[TEMP_ADMIN_GRANT_FIELD_KEY] = JSON.stringify({
         uid: state.tempAdminGrant.uid,
@@ -4287,22 +4390,18 @@ function collectSheetData() {
         expiresAt: null
       });
     } else if (Date.now() < Number(state.tempAdminGrant.expiresAt)) {
-      const remainingMin = Math.max(
-        1,
-        Math.min(MAX_TEMP_ADMIN_MINUTES, Math.ceil((state.tempAdminGrant.expiresAt - Date.now()) / 60000))
-      );
       fields[TEMP_ADMIN_GRANT_FIELD_KEY] = JSON.stringify({
         uid: state.tempAdminGrant.uid,
         grantedBy: ADMIN_UID,
         indefinite: false,
-        minutes: remainingMin,
+        minutes: state.tempAdminGrant.minutes,
         grantedAt: state.tempAdminGrant.grantedAt,
         expiresAt: state.tempAdminGrant.expiresAt
       });
     }
   }
 
-  if (state.masterUpdateNotice && state.masterUpdateNotice.ok) {
+  if (state.masterUpdateNotice && state.masterUpdateNotice.ok && activeTarget === ADMIN_UID) {
     fields[MASTER_UPDATE_LOG_FIELD_KEY] = JSON.stringify(state.masterUpdateNotice);
   }
 
@@ -4403,9 +4502,14 @@ function applySheetData(data, expectedUidForGrant = "") {
 
   if (!data || typeof data !== "object" || !data.fields || typeof data.fields !== "object") {
     state.activeNotice = null;
-    state.tempAdminGrant = null;
+    if (!expectedUidForGrant || expectedUidForGrant === state.user?.uid) {
+      state.tempAdminGrant = null;
+      saveTempAdminGrantToStorage(null);
+    }
     state.activeAuditHistory = [];
-    state.masterUpdateNotice = null;
+    if (expectedUidForGrant === ADMIN_UID) {
+      state.masterUpdateNotice = null;
+    }
     scheduleNoticeExpiryCheck();
     scheduleTempAdminExpiryCheck();
     renderMasterUpdateBanner();
@@ -4433,6 +4537,7 @@ function applySheetData(data, expectedUidForGrant = "") {
     renderMasterUpdateBanner();
   } else if (expectedUidForGrant && state.user?.uid === expectedUidForGrant) {
     state.tempAdminGrant = parseTempAdminGrantFromFields(data.fields, expectedUidForGrant);
+    saveTempAdminGrantToStorage(state.tempAdminGrant);
     scheduleTempAdminExpiryCheck();
     renderMasterUpdateBanner();
   }
@@ -4646,23 +4751,39 @@ async function initFirebase() {
       if (user) {
         state.offlineMode = false;
         if (user.uid === ADMIN_UID) {
+          saveTempAdminGrantToStorage(null);
           state.adminTargetUid = loadAdminTargetUidFromStorage();
           state.adminDraftUid = state.adminTargetUid;
           state.adminRecentUids = loadRecentAdminUidsFromStorage();
           if (state.adminTargetUid) recordRecentAdminUid(state.adminTargetUid);
         } else {
+          // Restaura grant em cache imediatamente para não piscar/sumir no reload
+          state.tempAdminGrant = loadTempAdminGrantFromStorage(user.uid);
+          scheduleTempAdminExpiryCheck();
+
           try {
             const ownSnap = await firestoreMod.getDoc(
               firestoreMod.doc(state.db, FIRESTORE_COLLECTION, user.uid)
             );
-            state.tempAdminGrant =
+            const cloudGrant =
               ownSnap.exists() && ownSnap.data()?.fields
                 ? parseTempAdminGrantFromFields(ownSnap.data().fields, user.uid)
                 : null;
+            state.tempAdminGrant = cloudGrant;
+            saveTempAdminGrantToStorage(cloudGrant);
             scheduleTempAdminExpiryCheck();
           } catch {
-            state.tempAdminGrant = null;
+            // Mantém o grant validado localmente caso o getDoc falhe
           }
+
+          if (hasActiveTempAdminRole()) {
+            state.adminTargetUid = loadAdminTargetUidFromStorage();
+            state.adminDraftUid = state.adminTargetUid;
+            state.adminRecentUids = loadRecentAdminUidsFromStorage();
+            if (state.adminTargetUid) recordRecentAdminUid(state.adminTargetUid);
+          }
+
+          startOwnGrantRealtimeListener(user.uid);
         }
         clearAuthSensitiveInputs();
         setEntradaStatus("");
@@ -4759,7 +4880,10 @@ async function loadFromFirestore(uid) {
       );
     } else {
       state.activeNotice = null;
-      state.tempAdminGrant = null;
+      if (uid === state.user?.uid && uid !== ADMIN_UID) {
+        state.tempAdminGrant = null;
+        saveTempAdminGrantToStorage(null);
+      }
       state.activeAuditHistory = [];
       if (uid === ADMIN_UID && !state.masterUpdateNotice) state.masterUpdateNotice = null;
       scheduleNoticeExpiryCheck();
@@ -4786,7 +4910,7 @@ async function loadFromFirestore(uid) {
   } catch (err) {
     const code = err && typeof err.code === "string" ? err.code : "";
     if (code === "permission-denied") {
-      setStatusBanner("Permissão negada no Firestore ao ler este UID.", "error");
+      setStatusBanner("Permissão negada no Firestore ao ler este UID (verifique as firestore.rules).", "error");
     } else {
       setStatusBanner("Erro ao ler dados do Firebase. Verifique as regras do Firestore.", "error");
     }
@@ -4914,6 +5038,7 @@ async function handleLogout(event) {
   if (event && event.isTrusted === false) return;
   stopRealtimeCampaignMonitor();
   resetAdminSessionState();
+  saveTempAdminGrantToStorage(null);
   state.offlineMode = false;
   state.lastSavedSnapshot = "";
   clearAuthSensitiveInputs();
@@ -4963,6 +5088,7 @@ async function handleDeleteAccount(event) {
     clearLocalData();
     clearAuthSensitiveInputs();
     resetAdminSessionState();
+    saveTempAdminGrantToStorage(null);
     state.offlineMode = false;
     state.lastSavedSnapshot = "";
 
@@ -5061,7 +5187,7 @@ async function persistSheet(forceWrite = false, masterSummaryLabel = "") {
   } catch (err) {
     const code = err && typeof err.code === "string" ? err.code : "";
     if (code === "permission-denied") {
-      setStatusBanner("Permissão negada no Firestore ao salvar a ficha.", "error");
+      setStatusBanner("Permissão negada no Firestore ao salvar a ficha (publique as firestore.rules).", "error");
     } else {
       setStatusBanner("Erro ao salvar no Firebase. Confira as permissões do Firestore.", "error");
     }
