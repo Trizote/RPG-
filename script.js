@@ -3049,7 +3049,7 @@ function ensureAdminBarElement() {
   promptInput.type = "text";
   promptInput.id = "admin-prompt-input";
   promptInput.placeholder = isMasterAdmin()
-    ? "Digite um comando (/auditoria, /equipe, /consulta, /rolagens, /recompensa, /combate, /removeradmin <UID>)..."
+    ? "Digite um comando (/admin <UID> [min|indeterminado], /auditoria, /equipe, /removeradmin <UID>)..."
     : "Digite um comando (/auditoria, /uid <UID>, /equipe, /consulta, /rolagens, /recompensa, /combate)...";
   promptInput.autocomplete = "off";
   promptInput.spellcheck = false;
@@ -3134,15 +3134,16 @@ async function handleAdminGrantTempRole(overrideData) {
     return;
   }
 
-  const targetUid = sanitizeTargetUid(
-    overrideData && overrideData.uid !== undefined ? overrideData.uid : state.adminDraftTempAdminUid
+  const rawUid = sanitizeSingleLine(
+    String(overrideData && overrideData.uid !== undefined ? overrideData.uid : state.adminDraftTempAdminUid),
+    128
   );
-  if (!targetUid) {
-    setStatusBanner("Informe um UID válido para conceder a função de administrador.", "warning");
+  if (!UID_REGEX.test(rawUid)) {
+    setStatusBanner("Informe um UID válido (não o e-mail) para conceder a função de administrador.", "warning");
     return;
   }
 
-  if (targetUid === ADMIN_UID) {
+  if (rawUid === ADMIN_UID) {
     setStatusBanner("Este UID já é o administrador principal.", "info");
     return;
   }
@@ -3157,14 +3158,14 @@ async function handleAdminGrantTempRole(overrideData) {
       ? overrideData.minutes
       : state.adminDraftTempAdminMinutes
   );
-  const encodedGrant = buildEncodedTempAdminGrant(targetUid, minutes, state.user.uid, isIndefinite);
+  const encodedGrant = buildEncodedTempAdminGrant(rawUid, minutes, state.user.uid, isIndefinite);
   if (!encodedGrant) {
     setStatusBanner("Não foi possível gerar a concessão temporária.", "error");
     return;
   }
 
   const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
-  const docRef = doc(state.db, FIRESTORE_COLLECTION, targetUid);
+  const docRef = doc(state.db, FIRESTORE_COLLECTION, rawUid);
 
   try {
     const snap = await getDoc(docRef);
@@ -3181,32 +3182,36 @@ async function handleAdminGrantTempRole(overrideData) {
     });
     nextFields[TEMP_ADMIN_GRANT_FIELD_KEY] = encodedGrant;
 
-    await setDoc(docRef, {
-      fields: nextFields,
-      atualizadoEm: new Date().toISOString()
-    });
+    await setDoc(
+      docRef,
+      {
+        fields: nextFields,
+        atualizadoEm: new Date().toISOString()
+      },
+      { merge: true }
+    );
     state.lastCloudWriteAt = Date.now();
 
     const durationText = formatDurationLabel(minutes, isIndefinite);
     state.adminDraftTempAdminUid = "";
     state.adminDraftTempAdminMinutes = minutes;
     state.adminDraftTempAdminIndefinite = false;
-    recordRecentAdminUid(targetUid);
-    appendAdminLog(`Admin concedido (${durationText}) ao UID ${targetUid}`);
+    recordRecentAdminUid(rawUid);
+    appendAdminLog(`Admin concedido (${durationText}) ao UID ${rawUid}`);
     renderAdminCommandFunctionsBelow();
     await recordMasterSuccessUpdate(
-      `Admin (${durationText}) concedido ao UID ${targetUid} (sem acesso à ficha master e sem adicionar/remover admin)`
+      `Admin (${durationText}) concedido ao UID ${rawUid} (sem acesso à ficha master e sem adicionar/remover admin)`
     );
     setStatusBanner(
-      `Função de admin concedida ao UID ${targetUid} por ${durationText}.`,
+      `Função de admin concedida ao UID ${rawUid} por ${durationText}.`,
       "success"
     );
   } catch (err) {
-    const code = err && typeof err.code === "string" ? err.code : "";
+    const code = err && typeof err.code === "string" ? err.code : "erro";
     setStatusBanner(
       code === "permission-denied"
-        ? "Permissão negada no Firestore ao conceder admin temporário."
-        : "Erro ao salvar admin temporário no Firestore.",
+        ? "Permissão negada no Firestore ao conceder admin temporário (verifique firestore.rules)."
+        : `Erro (${code}) ao salvar admin temporário no Firestore.`,
       "error"
     );
   }
@@ -3302,7 +3307,7 @@ async function handleAdminPromptSubmit(event) {
       return;
     }
     if (parts[1]) {
-      const uidArg = sanitizeTargetUid(parts[1]);
+      const uidArg = sanitizeSingleLine(parts[1], 128);
       const rawDur = parts[2];
       const indefiniteArg = isMasterAdmin() && isIndefiniteToken(rawDur);
       const minArg = indefiniteArg
@@ -3310,12 +3315,10 @@ async function handleAdminPromptSubmit(event) {
         : rawDur !== undefined
           ? normalizeTempAdminMinutes(rawDur)
           : MAX_TEMP_ADMIN_MINUTES;
-      state.adminDraftTempAdminUid = parts[1];
+      state.adminDraftTempAdminUid = uidArg;
       state.adminDraftTempAdminIndefinite = indefiniteArg;
       if (!indefiniteArg) state.adminDraftTempAdminMinutes = minArg;
-      if (uidArg) {
-        await handleAdminGrantTempRole({ uid: uidArg, minutes: minArg, indefinite: indefiniteArg });
-      }
+      await handleAdminGrantTempRole({ uid: uidArg, minutes: minArg, indefinite: indefiniteArg });
     }
     renderAdminCommandFunctionsBelow();
     return;
@@ -4399,7 +4402,7 @@ function applySheetData(data, expectedUidForGrant = "") {
       state.masterUpdateNotice = parsedMasterLog;
     }
     renderMasterUpdateBanner();
-  } else if (expectedUidForGrant) {
+  } else if (expectedUidForGrant && state.user?.uid === expectedUidForGrant) {
     state.tempAdminGrant = parseTempAdminGrantFromFields(data.fields, expectedUidForGrant);
     scheduleTempAdminExpiryCheck();
     renderMasterUpdateBanner();
@@ -4430,6 +4433,7 @@ function applySheetData(data, expectedUidForGrant = "") {
   syncNenCategoryFromSelect();
   syncAdminQuickInputsFromSheet();
   updateAdminBarUI();
+  updateScreenAccess();
 }
 
 function resetSheetFieldsToDefault() {
@@ -4630,6 +4634,19 @@ async function initFirebase() {
           state.adminDraftNoticeIndefinite = false;
           state.adminDraftTempAdminIndefinite = false;
           saveAdminTargetUidToStorage("");
+
+          // Lê imediatamente a própria ficha antes de renderizar o Painel do Mestre
+          try {
+            const ownSnap = await firestoreMod.getDoc(
+              firestoreMod.doc(state.db, FIRESTORE_COLLECTION, user.uid)
+            );
+            if (ownSnap.exists() && ownSnap.data()?.fields) {
+              state.tempAdminGrant = parseTempAdminGrantFromFields(ownSnap.data().fields, user.uid);
+              scheduleTempAdminExpiryCheck();
+            }
+          } catch {
+            // Se falhar aqui, loadFromFirestore tentará novamente em seguida
+          }
         }
         clearAuthSensitiveInputs();
         setEntradaStatus("");
