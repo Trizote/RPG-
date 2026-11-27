@@ -583,6 +583,8 @@ function startRealtimeCampaignMonitor() {
   state.realtimeAllUnsubscribe = onSnapshot(
     colRef,
     (snapshot) => {
+      const justWroteSelf = Date.now() - state.lastCloudWriteAt < 2000;
+
       snapshot.docChanges().forEach((change) => {
         const docId = change.doc.id;
         if (docId === GLOBAL_BROADCAST_DOC_ID) return;
@@ -604,7 +606,7 @@ function startRealtimeCampaignMonitor() {
         });
         state.lastObservedByUid[docId] = clonedSnapshot;
 
-        if (change.type === "modified" && prevFields) {
+        if (change.type === "modified" && prevFields && !justWroteSelf) {
           const diffs = computeFieldDiffBetweenMaps(prevFields, newFields);
           if (diffs.length) {
             const timeStr = new Date().toLocaleTimeString("pt-BR", {
@@ -1147,11 +1149,11 @@ async function recordMasterSuccessUpdate(summaryText) {
     });
     nextFields[MASTER_UPDATE_LOG_FIELD_KEY] = JSON.stringify(payloadObj);
 
+    state.lastCloudWriteAt = Date.now();
     await setDoc(masterDocRef, {
       fields: nextFields,
       atualizadoEm: isoNow
     });
-    state.lastCloudWriteAt = Date.now();
 
     if (getActiveTargetUid() === ADMIN_UID) {
       captureBaselineFields(nextFields);
@@ -3219,6 +3221,7 @@ async function handleAdminGrantTempRole(overrideData) {
     });
     nextFields[TEMP_ADMIN_GRANT_FIELD_KEY] = encodedGrant;
 
+    state.lastCloudWriteAt = Date.now();
     await setDoc(
       docRef,
       {
@@ -3227,7 +3230,6 @@ async function handleAdminGrantTempRole(overrideData) {
       },
       { merge: true }
     );
-    state.lastCloudWriteAt = Date.now();
 
     const durationText = formatDurationLabel(minutes, isIndefinite);
     state.adminDraftTempAdminUid = "";
@@ -3299,11 +3301,11 @@ async function handleAdminRevokeTempRole(rawUidOverride) {
       }
     });
 
+    state.lastCloudWriteAt = Date.now();
     await setDoc(docRef, {
       fields: nextFields,
       atualizadoEm: new Date().toISOString()
     });
-    state.lastCloudWriteAt = Date.now();
 
     state.adminDraftRevokeAdminUid = "";
     appendAdminLog(`Função de admin temporário/indeterminado removida do UID ${rawCleaned}`);
@@ -3360,6 +3362,7 @@ async function handleAdminPromptSubmit(event) {
       state.adminDraftTempAdminIndefinite = indefiniteArg;
       if (!indefiniteArg) state.adminDraftTempAdminMinutes = minArg;
       await handleAdminGrantTempRole({ uid: uidArg, minutes: minArg, indefinite: indefiniteArg });
+      if (input) input.value = "";
     }
     renderAdminCommandFunctionsBelow();
     return;
@@ -3369,6 +3372,7 @@ async function handleAdminPromptSubmit(event) {
     if (parts[1]) {
       state.adminDraftRevokeAdminUid = parts[1];
       await handleAdminRevokeTempRole(parts[1]);
+      if (input) input.value = "";
     }
     renderAdminCommandFunctionsBelow();
     return;
@@ -3490,7 +3494,7 @@ function handleAdminShowDiff() {
 
 function handleAdminExportJson() {
   if (!isCurrentUserAdmin()) return;
-  const payload = buildSanitizedCloudPayload();
+  const payload = buildSanitizedCloudPayload(collectSheetData());
   const exportObj = {
     alvoUid: getActiveTargetUid(),
     exportadoEm: new Date().toISOString(),
@@ -3716,11 +3720,11 @@ async function handleAdminSendNotice(overrideData) {
       const globalFields = createSafeRecord();
       globalFields[ADMIN_NOTICE_FIELD_KEY] = encodedPayload;
 
+      state.lastCloudWriteAt = Date.now();
       await setDoc(globalRef, {
         fields: globalFields,
         atualizadoEm: new Date().toISOString()
       });
-      state.lastCloudWriteAt = Date.now();
       state.adminDraftNoticeText = "";
       state.adminDraftNoticeIndefinite = false;
       state.globalNotice = parseNoticeObject(encodedPayload, "all");
@@ -3783,11 +3787,11 @@ async function handleAdminSendNotice(overrideData) {
     });
     nextFields[ADMIN_NOTICE_FIELD_KEY] = encodedPayload;
 
+    state.lastCloudWriteAt = Date.now();
     await setDoc(docRef, {
       fields: nextFields,
       atualizadoEm: new Date().toISOString()
     });
-    state.lastCloudWriteAt = Date.now();
 
     state.adminDraftNoticeText = "";
     state.adminDraftNoticeIndefinite = false;
@@ -3831,8 +3835,8 @@ async function handleAdminClearNotice(overrideData) {
 
   if (broadcastAll) {
     try {
-      await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, GLOBAL_BROADCAST_DOC_ID));
       state.lastCloudWriteAt = Date.now();
+      await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, GLOBAL_BROADCAST_DOC_ID));
       state.globalNotice = null;
       scheduleNoticeExpiryCheck();
       renderPlayerNoticeBanner();
@@ -3877,11 +3881,11 @@ async function handleAdminClearNotice(overrideData) {
       }
     });
 
+    state.lastCloudWriteAt = Date.now();
     await setDoc(docRef, {
       fields: nextFields,
       atualizadoEm: new Date().toISOString()
     });
-    state.lastCloudWriteAt = Date.now();
 
     if (getActiveTargetUid() === targetUid) {
       state.activeNotice = null;
@@ -4319,8 +4323,8 @@ function collectSheetData() {
   };
 }
 
-function buildSanitizedCloudPayload() {
-  const raw = collectSheetData();
+function buildSanitizedCloudPayload(sourceData = null) {
+  const raw = sourceData && sourceData.fields ? sourceData : collectSheetData();
   const cleanFields = createSafeRecord();
 
   if (raw && raw.fields && typeof raw.fields === "object") {
@@ -4764,10 +4768,10 @@ async function loadFromFirestore(uid) {
       renderPlayerNoticeBanner();
       resetSheetFieldsToDefault();
       const initialData = buildSanitizedCloudPayload();
+      state.lastCloudWriteAt = Date.now();
       await setDoc(docRef, initialData);
       captureBaselineFields(initialData.fields);
       state.lastSavedSnapshot = computeFieldsSnapshot(initialData.fields);
-      state.lastCloudWriteAt = Date.now();
       if (!isCurrentUserAdmin() || uid === state.user?.uid) {
         saveLocalData(initialData);
       }
@@ -4799,8 +4803,8 @@ async function saveToFirestore(uid, data) {
   const { doc, setDoc } = state.firebaseModules.firestoreMod;
   const docRef = doc(state.db, FIRESTORE_COLLECTION, uid);
   const safeData = data && data.fields ? data : buildSanitizedCloudPayload();
-  await setDoc(docRef, safeData, { merge: true });
   state.lastCloudWriteAt = Date.now();
+  await setDoc(docRef, safeData, { merge: true });
   return true;
 }
 
@@ -4839,6 +4843,7 @@ async function handleClearSheetData(event) {
   if (state.firebaseReady && state.db && targetUid) {
     const { doc, deleteDoc } = state.firebaseModules.firestoreMod;
     try {
+      state.lastCloudWriteAt = Date.now();
       await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, targetUid));
       appendAdminLog(`Ficha excluída da nuvem para UID ${targetUid}`);
       await recordMasterSuccessUpdate(`Ficha removida da nuvem para o UID ${targetUid}`);
@@ -4943,12 +4948,18 @@ async function handleDeleteAccount(event) {
   setStatusBanner("Excluindo conta e dados salvos...", "info");
 
   try {
-    if (state.db && uid) {
-      await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, uid));
-    }
-
     stopRealtimeCampaignMonitor();
     await deleteUser(currentUser);
+
+    if (state.db && uid) {
+      try {
+        state.lastCloudWriteAt = Date.now();
+        await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, uid));
+      } catch {
+        // Conta já removida do Auth
+      }
+    }
+
     clearLocalData();
     clearAuthSensitiveInputs();
     resetAdminSessionState();
@@ -5018,7 +5029,7 @@ async function persistSheet(forceWrite = false, masterSummaryLabel = "") {
         return;
       }
 
-      const cloudPayload = buildSanitizedCloudPayload();
+      const cloudPayload = buildSanitizedCloudPayload(payload);
       await saveToFirestore(targetUid, cloudPayload);
       state.activeAuditHistory = parseAuditHistoryFromFields(cloudPayload.fields);
       captureBaselineFields(cloudPayload.fields);
@@ -5142,6 +5153,43 @@ function initLgpdBanner() {
   acceptBtn.dataset.lgpdBound = "1";
 
   acceptBtn.addEventListener("click", aceitarLgpdBanner);
+}
+
+function handleSheetControlMutation(event) {
+  const target = event.target;
+  if (!target || target.closest("#login-firebase")) return;
+  if (isInspectionReadOnlyActive()) {
+    event.preventDefault();
+    return;
+  }
+
+  if (target.id === "categoria-principal-nen") {
+    const selectedOptionText =
+      target.options && target.selectedIndex >= 0
+        ? target.options[target.selectedIndex].textContent || ""
+        : "";
+    applyNenCategoryTheme(target.value || selectedOptionText);
+  }
+
+  if (
+    target.closest("#tabela-pericias") ||
+    target.id === "attr-agi" ||
+    target.id === "attr-for" ||
+    target.id === "attr-ca" ||
+    target.id === "attr-int" ||
+    target.id === "attr-vig"
+  ) {
+    recalculateSkillsTable();
+  }
+
+  if (target.id === "nv-val" || target.id === "rank-val" || target.id === "espacos-max") {
+    syncAdminQuickInputsFromSheet();
+    if (state.adminActiveCommand === "/stats") {
+      renderAdminCommandFunctionsBelow();
+    }
+  }
+
+  scheduleAutoSave();
 }
 
 function bindEvents() {
@@ -5276,7 +5324,9 @@ function bindEvents() {
   }
 
   if (deleteCancelBtn && deleteConfirmBox) {
-    deleteConfirmBox.hidden = true;
+    deleteCancelBtn.addEventListener("click", () => {
+      deleteConfirmBox.hidden = true;
+    });
   }
 
   if (deleteConfirmBtn) {
@@ -5295,79 +5345,8 @@ function bindEvents() {
 
   const mainEl = document.querySelector("main.container");
   if (mainEl) {
-    mainEl.addEventListener("input", (event) => {
-      const target = event.target;
-      if (!target || target.closest("#login-firebase")) return;
-      if (isInspectionReadOnlyActive()) {
-        event.preventDefault();
-        return;
-      }
-
-      if (target.id === "categoria-principal-nen") {
-        const selectedOptionText =
-          target.options && target.selectedIndex >= 0
-            ? target.options[target.selectedIndex].textContent || ""
-            : "";
-        applyNenCategoryTheme(target.value || selectedOptionText);
-      }
-
-      if (
-        target.closest("#tabela-pericias") ||
-        target.id === "attr-agi" ||
-        target.id === "attr-for" ||
-        target.id === "attr-ca" ||
-        target.id === "attr-int" ||
-        target.id === "attr-vig"
-      ) {
-        recalculateSkillsTable();
-      }
-
-      if (target.id === "nv-val" || target.id === "rank-val" || target.id === "espacos-max") {
-        syncAdminQuickInputsFromSheet();
-        if (state.adminActiveCommand === "/stats") {
-          renderAdminCommandFunctionsBelow();
-        }
-      }
-
-      scheduleAutoSave();
-    });
-
-    mainEl.addEventListener("change", (event) => {
-      const target = event.target;
-      if (!target || target.closest("#login-firebase")) return;
-      if (isInspectionReadOnlyActive()) {
-        event.preventDefault();
-        return;
-      }
-
-      if (target.id === "categoria-principal-nen") {
-        const selectedOptionText =
-          target.options && target.selectedIndex >= 0
-            ? target.options[target.selectedIndex].textContent || ""
-            : "";
-        applyNenCategoryTheme(target.value || selectedOptionText);
-      }
-
-      if (
-        target.closest("#tabela-pericias") ||
-        target.id === "attr-agi" ||
-        target.id === "attr-for" ||
-        target.id === "attr-ca" ||
-        target.id === "attr-int" ||
-        target.id === "attr-vig"
-      ) {
-        recalculateSkillsTable();
-      }
-
-      if (target.id === "nv-val" || target.id === "rank-val" || target.id === "espacos-max") {
-        syncAdminQuickInputsFromSheet();
-        if (state.adminActiveCommand === "/stats") {
-          renderAdminCommandFunctionsBelow();
-        }
-      }
-
-      scheduleAutoSave();
-    });
+    mainEl.addEventListener("input", handleSheetControlMutation);
+    mainEl.addEventListener("change", handleSheetControlMutation);
   }
 }
 
