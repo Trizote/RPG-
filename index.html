@@ -126,6 +126,60 @@
 
       <div id="status-banner" class="status-banner" role="status" aria-live="polite" hidden></div>
 
+      <!-- ABA ADMIN: CONSOLE DE COMANDOS (Acima de Sessão & Nuvem) -->
+      <section id="admin-painel" class="secao" hidden>
+        <h2 class="titulo-secao">Painel do Administrador</h2>
+
+        <div class="card">
+          <div class="card-header roxo">Console de Comandos Específicos</div>
+          <p class="texto-nen">
+            Cada comando executa uma função específica no sistema e exige <strong>/</strong> no início. Digite <strong>/ajuda</strong> para listar os comandos disponíveis.
+          </p>
+
+          <div class="barra-carga" style="margin-bottom: 12px; gap: 12px;">
+            <div style="flex: 1; min-width: 220px;">
+              <label for="admin-target-uid" style="display: block; font-size: 0.78rem; color: var(--texto-suave); margin-bottom: 4px;">
+                Jogador / UID carregado na ficha:
+              </label>
+              <select id="admin-target-uid">
+                <option value="">Minha própria ficha (padrão)</option>
+              </select>
+            </div>
+            <div>
+              <span style="display: block; font-size: 0.78rem; color: var(--texto-suave); margin-bottom: 4px;">Modo de Edição:</span>
+              <strong id="admin-readonly-badge" style="color: var(--destaque-ouro);">Edição Liberada</strong>
+            </div>
+          </div>
+
+          <form id="admin-cmd-form" class="senha-grupo" autocomplete="off">
+            <input
+              type="text"
+              id="admin-cmd-input"
+              placeholder="Ex: /ajuda | /ver_ficha &lt;uid&gt; | /msg &lt;uid&gt; oi | /broadcast aviso | /somente_leitura on | /transferir_ficha &lt;de&gt; &lt;para&gt;"
+              aria-label="Comando do administrador"
+            >
+            <button type="submit" id="admin-cmd-run-btn" class="btn-arkan btn-azul">Executar</button>
+          </form>
+
+          <div class="auth-acoes">
+            <button type="button" class="btn-arkan btn-roxo" data-admin-quick="/ajuda">/ajuda</button>
+            <button type="button" class="btn-arkan btn-azul" data-admin-quick="/status">/status</button>
+            <button type="button" class="btn-arkan btn-roxo" data-admin-quick="/salvar">/salvar</button>
+            <button type="button" class="btn-arkan btn-azul" data-admin-quick="/somente_leitura">/somente_leitura</button>
+            <button type="button" class="btn-arkan btn-roxo" data-admin-quick="/voltar_minha_ficha">/voltar_minha_ficha</button>
+            <button type="button" class="btn-arkan btn-perigo" data-admin-quick="/limpar">/limpar</button>
+          </div>
+
+          <div
+            id="admin-cmd-output"
+            class="entrada-status"
+            role="log"
+            aria-live="polite"
+            style="margin-top: 14px; white-space: pre-line; font-family: monospace;"
+          >Console pronto. Digite "/ajuda" e clique em Executar.</div>
+        </div>
+      </section>
+
       <!-- Painel de Sessão Ativa (Firebase ou Offline/Local) -->
       <section id="login-firebase" class="secao">
         <div class="card">
@@ -927,45 +981,6 @@
             (c) Usar aba anônima ou navegação privada;
             (d) Clicar em <strong>Excluir ficha</strong> ou <strong>Excluir conta</strong> e confirmar (o que apaga a ficha salva no Firebase e limpa os dados locais deste navegador).
           </p>
-        </div>
-      </section>
-
-      <!-- ==========================================
-           ABA ADMIN: COMANDOS DO ADMINISTRADOR
-      =========================================== -->
-      <section id="admin-painel" class="secao" hidden>
-        <h2 class="titulo-secao">Painel do Administrador</h2>
-
-        <div class="card">
-          <div class="card-header roxo">Console de Comandos Específicos</div>
-          <p class="texto-nen">
-            Cada comando executa uma função específica no sistema. Digite <strong>ajuda</strong> para listar os comandos disponíveis.
-          </p>
-
-          <form id="admin-cmd-form" class="senha-grupo" autocomplete="off">
-            <input
-              type="text"
-              id="admin-cmd-input"
-              placeholder="Ex: ajuda | status | nen reforco | rank A | xp 250 | ir guilda | buscar_ficha <uid>"
-              aria-label="Comando do administrador"
-            >
-            <button type="submit" id="admin-cmd-run-btn" class="btn-arkan btn-azul">Executar</button>
-          </form>
-
-          <div class="auth-acoes">
-            <button type="button" class="btn-arkan btn-roxo" data-admin-quick="ajuda">ajuda</button>
-            <button type="button" class="btn-arkan btn-azul" data-admin-quick="status">status</button>
-            <button type="button" class="btn-arkan btn-roxo" data-admin-quick="salvar">salvar</button>
-            <button type="button" class="btn-arkan btn-perigo" data-admin-quick="limpar">limpar</button>
-          </div>
-
-          <div
-            id="admin-cmd-output"
-            class="entrada-status"
-            role="log"
-            aria-live="polite"
-            style="margin-top: 14px; white-space: pre-line; font-family: monospace;"
-          >Console pronto. Digite "ajuda" e clique em Executar.</div>
         </div>
       </section>
 
