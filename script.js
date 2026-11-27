@@ -5,10 +5,12 @@
    + Firebase Authentication & Cloud Firestore + Sessão Offline/Local temporária
    + Modo Administrador por UID (exclusivo): Prompt de Comando, Funções
      Dinâmicas do Comando Abaixo, Todos os Comandos Ativos, Mensagem até 24h
-     (Normal/Urgente) para UID ou TODOS os jogadores, Admin Temporário até 24h
-     (sem adicionar/remover admin), Aviso de Atualização 100% Funcional na
-     Conta Master, Somente Leitura, UIDs Recentes, Ajuste Rápido, Modelos Base,
-     Diff, Backup JSON e Log
+     ou Tempo Indeterminado no Painel Mestre (Normal/Urgente) para UID ou
+     TODOS os jogadores, Admin Temporário até 24h ou Tempo Indeterminado no
+     Painel Mestre (sem adicionar/remover admin), Aviso de Atualização 100%
+     Funcional na Conta Master com Leitura Automática do que foi Adicionado,
+     Somente Leitura, UIDs Recentes, Ajuste Rápido, Modelos Base, Diff,
+     Backup JSON e Log
    + Exclusão de ficha e exclusão de conta
    + Sincronização precisa das seções no topo conforme a rolagem
    + Cores dinâmicas conforme a Categoria Principal de Afinidade de Nen
@@ -34,7 +36,8 @@ const STORAGE_KEYS = Object.freeze({
   COOKIE_CONSENT: "ordem_de_arkan_lgpd_v1",
   ADMIN_TARGET_UID: "ordem_de_arkan_admin_target_uid_v1",
   ADMIN_RECENT_UIDS: "ordem_de_arkan_admin_recent_uids_v1",
-  MASTER_SEEN_RELEASE: "ordem_de_arkan_master_seen_release_v1"
+  MASTER_SEEN_RELEASE: "ordem_de_arkan_master_seen_release_v1",
+  MASTER_AUTO_SNAPSHOT: "ordem_de_arkan_master_auto_snapshot_v1"
 });
 
 const ADMIN_UID = "TcudbnuOMcTySJWhz0JHaNDuNU22";
@@ -51,13 +54,13 @@ const MAX_RECENT_UIDS = 6;
 const MAX_ADMIN_LOGS = 25;
 
 const ADMIN_COMMAND_CATALOG = Object.freeze([
-  { cmd: "/admin", syntax: "/admin <UID> [min]", desc: "Dar admin até 24h (sem add/remover admin)", masterOnly: true },
+  { cmd: "/admin", syntax: "/admin <UID> [min|indeterminado]", desc: "Dar admin até 24h (ou indeterminado no master; sem add/remover admin)", masterOnly: true },
   { cmd: "/uid", syntax: "/uid <UID>", desc: "Carregar ou trocar UID alvo" },
   { cmd: "/minha", syntax: "/minha", desc: "Voltar para a própria ficha" },
-  { cmd: "/recado", syntax: "/recado <min> <texto>", desc: "Enviar recado normal para UID (até 24h)" },
-  { cmd: "/urgente", syntax: "/urgente <min> <texto>", desc: "Enviar recado urgente para UID (até 24h)" },
-  { cmd: "/todos", syntax: "/todos <min> <texto>", desc: "Enviar mensagem normal para TODOS os jogadores (até 24h)" },
-  { cmd: "/todosurgente", syntax: "/todosurgente <min> <texto>", desc: "Enviar mensagem URGENTE para TODOS os jogadores (até 24h)" },
+  { cmd: "/recado", syntax: "/recado <min|indeterminado> <texto>", desc: "Enviar recado normal para UID" },
+  { cmd: "/urgente", syntax: "/urgente <min|indeterminado> <texto>", desc: "Enviar recado urgente para UID" },
+  { cmd: "/todos", syntax: "/todos <min|indeterminado> <texto>", desc: "Enviar mensagem normal para TODOS os jogadores" },
+  { cmd: "/todosurgente", syntax: "/todosurgente <min|indeterminado> <texto>", desc: "Enviar mensagem URGENTE para TODOS os jogadores" },
   { cmd: "/remover", syntax: "/remover", desc: "Remover recado ativo (UID ou global)" },
   { cmd: "/ler", syntax: "/ler [on|off]", desc: "Alternar modo somente leitura" },
   { cmd: "/stats", syntax: "/stats", desc: "Ajustar Nível, Rank e Espaços" },
@@ -211,6 +214,8 @@ const state = {
   tempAdminExpiryTimer: null,
   masterUpdateNotice: null,
   masterReleaseNotice: null,
+  autoDetectedAdditions: null,
+  autoSyncDoneForSession: false,
   adminTargetUid: "",
   adminRecentUids: [],
   adminReadOnly: false,
@@ -220,8 +225,10 @@ const state = {
   adminDraftUid: "",
   adminDraftTempAdminUid: "",
   adminDraftTempAdminMinutes: MAX_TEMP_ADMIN_MINUTES,
+  adminDraftTempAdminIndefinite: false,
   adminDraftNoticeText: "",
   adminDraftNoticeMinutes: MAX_NOTICE_MINUTES,
+  adminDraftNoticeIndefinite: false,
   adminDraftNoticePriority: "normal",
   adminDraftNoticeTargetMode: "uid",
   adminDraftNv: "1",
@@ -234,6 +241,19 @@ const state = {
   globalNotice: null,
   noticeExpiryTimer: null
 };
+
+function isIndefiniteToken(rawVal) {
+  if (rawVal === true) return true;
+  if (typeof rawVal === "string") {
+    const clean = rawVal
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toLowerCase();
+    return ["indeterminado", "infinito", "permanente", "sem-tempo", "sem_tempo", "ilimitado"].includes(clean);
+  }
+  return false;
+}
 
 /* --------------------------------------------------------------------------
    Animação 3D de Digitação Letra por Letra no Título de Entrada
@@ -412,8 +432,114 @@ function initConsoleSecurityGuard() {
 }
 
 /* --------------------------------------------------------------------------
-   Aviso de Atualização de HTML / CSS / JS na Conta do Administrador Master
+   Leitura Automática do que foi Adicionado + Aviso no Administrador Master
    -------------------------------------------------------------------------- */
+function collectRuntimeAdditionsSnapshot() {
+  const commands = ADMIN_COMMAND_CATALOG.map((c) => c.cmd);
+  const sections = TRACKED_SECTIONS.map((s) => s.id);
+  const fieldIds = Array.from(document.querySelectorAll("main.container [id]"))
+    .map((el) => el.id)
+    .filter((id) => Boolean(id) && !id.startsWith("admin-"));
+
+  return {
+    commands,
+    sections,
+    fieldIds,
+    capturedAt: new Date().toISOString()
+  };
+}
+
+function detectAddedChangesAutomatically(manifestData = null) {
+  const current = collectRuntimeAdditionsSnapshot();
+  const addedCommands = [];
+  const addedSections = [];
+  const addedFields = [];
+  const manifestFunctions = manifestData
+    ? sanitizeStringArray(manifestData.addedFunctions || manifestData.added, 15, 180)
+    : [];
+  const manifestFiles = manifestData
+    ? sanitizeStringArray(manifestData.filesUpdated || manifestData.files, 12, 80)
+    : [];
+
+  let previous = null;
+  try {
+    const rawPrev = localStorage.getItem(STORAGE_KEYS.MASTER_AUTO_SNAPSHOT);
+    if (rawPrev) {
+      previous = JSON.parse(rawPrev);
+    }
+  } catch {
+    previous = null;
+  }
+
+  if (previous && typeof previous === "object") {
+    const prevCmds = new Set(Array.isArray(previous.commands) ? previous.commands : []);
+    const prevSecs = new Set(Array.isArray(previous.sections) ? previous.sections : []);
+    const prevFields = new Set(Array.isArray(previous.fieldIds) ? previous.fieldIds : []);
+
+    current.commands.forEach((cmd) => {
+      if (!prevCmds.has(cmd)) addedCommands.push(`Comando ${cmd}`);
+    });
+    current.sections.forEach((sec) => {
+      if (!prevSecs.has(sec)) addedSections.push(`Seção #${sec}`);
+    });
+    current.fieldIds.forEach((fid) => {
+      if (!prevFields.has(fid)) addedFields.push(`Campo #${fid}`);
+    });
+  }
+
+  try {
+    localStorage.setItem(STORAGE_KEYS.MASTER_AUTO_SNAPSHOT, JSON.stringify(current));
+  } catch {
+    // Ignora falha de armazenamento local
+  }
+
+  const combinedAdded = Array.from(
+    new Set([
+      ...manifestFunctions,
+      ...addedCommands,
+      ...addedSections,
+      ...addedFields
+    ])
+  ).slice(0, 15);
+
+  const summaryItems = [];
+  if (manifestFiles.length) summaryItems.push(`Arquivos: ${manifestFiles.join(", ")}`);
+  if (combinedAdded.length) summaryItems.push(`Adicionado: ${combinedAdded.join(" · ")}`);
+  if (!summaryItems.length) {
+    summaryItems.push(
+      `Sistema verificado (${current.commands.length} comandos admin, ${current.sections.length} seções, ${current.fieldIds.length} campos ativos)`
+    );
+  }
+
+  const info = {
+    summary: summaryItems.join(" | "),
+    filesUpdated: manifestFiles,
+    addedFunctions: combinedAdded,
+    detectedAt: new Date().toISOString()
+  };
+
+  state.autoDetectedAdditions = info;
+  return info;
+}
+
+async function syncAutoDetectedChangesToAdminNotice() {
+  if (!isMasterAdmin() || state.autoSyncDoneForSession) return;
+  const info = state.autoDetectedAdditions || detectAddedChangesAutomatically(null);
+  if (!info || !info.summary) return;
+
+  state.autoSyncDoneForSession = true;
+  state.masterUpdateNotice = {
+    added: sanitizeSingleLine(info.summary, 240),
+    updatedAt: info.detectedAt || new Date().toISOString(),
+    ok: true
+  };
+  renderMasterUpdateBanner();
+
+  if (state.firebaseReady && state.db && state.user?.uid) {
+    await recordMasterSuccessUpdate(info.summary);
+  }
+}
+
 function verifySiteRuntimeHealth() {
   const hasAppContainer = Boolean(document.getElementById("app-ficha"));
   const hasMainSheet = Boolean(document.querySelector("main.container"));
@@ -504,7 +630,7 @@ function renderMasterCodeReleaseBanner() {
         minute: "2-digit"
       });
 
-  activeBanner.innerHTML = "";
+  activeBanner.replaceChildren();
 
   const header = document.createElement("div");
   header.style.cssText =
@@ -553,7 +679,7 @@ function renderMasterCodeReleaseBanner() {
 
   if (rel.addedFunctions.length) {
     const fnTitle = document.createElement("div");
-    fnTitle.textContent = "Novas funções adicionadas:";
+    fnTitle.textContent = "O que foi lido e adicionado automaticamente:";
     fnTitle.style.cssText = "font-size: 12px; font-weight: 700; color: #ffd966; margin-bottom: 4px;";
     activeBanner.appendChild(fnTitle);
 
@@ -595,40 +721,66 @@ async function checkMasterCodeReleaseNotice() {
     return;
   }
 
+  let manifestData = null;
   try {
     const res = await fetch(`${RELEASE_MANIFEST_URL}?cb=${Date.now()}`, {
       cache: "no-store"
     });
-    if (!res.ok) return;
-
-    const data = await res.json();
-    if (!data || typeof data !== "object") return;
-
-    const version = sanitizeSingleLine(String(data.version ?? ""), 60);
-    if (!version) return;
-
-    const seenVersion = getSeenMasterReleaseVersion();
-    if (seenVersion === version) {
-      state.masterReleaseNotice = null;
-      renderMasterCodeReleaseBanner();
-      return;
+    if (res.ok) {
+      manifestData = await res.json();
     }
-
-    const healthy = verifySiteRuntimeHealth();
-    if (!healthy) return;
-
-    state.masterReleaseNotice = {
-      version,
-      publishedAt: sanitizeSingleLine(String(data.publishedAt ?? ""), 60),
-      filesUpdated: sanitizeStringArray(data.filesUpdated, 10, 80),
-      addedFunctions: sanitizeStringArray(data.addedFunctions, 12, 180),
-      improvements: sanitizeStringArray(data.improvements, 12, 180)
-    };
-
-    renderMasterCodeReleaseBanner();
   } catch {
-    // Falha silenciosa caso o manifest ainda não esteja disponível
+    manifestData = null;
   }
+
+  const autoInfo = detectAddedChangesAutomatically(manifestData);
+  const healthy = verifySiteRuntimeHealth();
+  if (!healthy) return;
+
+  const version = sanitizeSingleLine(
+    String(manifestData?.version || autoInfo.detectedAt || "runtime"),
+    60
+  );
+  if (!version) return;
+
+  const seenVersion = getSeenMasterReleaseVersion();
+  if (manifestData?.version && seenVersion === version && !autoInfo.addedFunctions.length) {
+    state.masterReleaseNotice = null;
+    renderMasterCodeReleaseBanner();
+    return;
+  }
+
+  const filesFromManifest = sanitizeStringArray(
+    manifestData?.filesUpdated || manifestData?.files,
+    10,
+    80
+  );
+  const addedFromManifest = sanitizeStringArray(
+    manifestData?.addedFunctions || manifestData?.added,
+    12,
+    180
+  );
+  const improvementsFromManifest = sanitizeStringArray(
+    manifestData?.improvements,
+    12,
+    180
+  );
+
+  const mergedAdded = Array.from(new Set([...addedFromManifest, ...autoInfo.addedFunctions])).slice(0, 15);
+
+  state.masterReleaseNotice = {
+    version,
+    publishedAt: sanitizeSingleLine(
+      String(manifestData?.publishedAt || manifestData?.updatedAt || autoInfo.detectedAt || ""),
+      60
+    ),
+    filesUpdated: filesFromManifest,
+    addedFunctions: mergedAdded,
+    improvements: improvementsFromManifest
+  };
+
+  renderMasterCodeReleaseBanner();
+  await syncAutoDetectedChangesToAdminNotice();
 }
 
 /* --------------------------------------------------------------------------
@@ -713,7 +865,7 @@ function renderMasterUpdateBanner() {
         minute: "2-digit"
       });
 
-  activeBanner.innerHTML = "";
+  activeBanner.replaceChildren();
 
   const topRow = document.createElement("div");
   topRow.style.cssText =
@@ -803,7 +955,7 @@ async function recordMasterSuccessUpdate(summaryText) {
 }
 
 /* --------------------------------------------------------------------------
-   Administrador Temporário até 24h (Sem Permissão de Adicionar/Remover Admin)
+   Administrador Temporário até 24h ou Indeterminado (Sem Permissão Add/Rem Admin)
    -------------------------------------------------------------------------- */
 function normalizeTempAdminMinutes(rawMinutes) {
   const num = Number(rawMinutes);
@@ -811,13 +963,26 @@ function normalizeTempAdminMinutes(rawMinutes) {
   return Math.min(MAX_TEMP_ADMIN_MINUTES, Math.max(1, Math.trunc(num)));
 }
 
-function buildEncodedTempAdminGrant(targetUid, minutesValue, grantedByUid) {
+function buildEncodedTempAdminGrant(targetUid, minutesValue, grantedByUid, indefinite = false) {
   const uid = sanitizeTargetUid(targetUid);
   const granter = sanitizeTargetUid(grantedByUid);
   if (!uid || granter !== ADMIN_UID) return "";
 
-  const minutes = normalizeTempAdminMinutes(minutesValue);
+  const isIndefinite = Boolean(indefinite);
   const nowMs = Date.now();
+
+  if (isIndefinite) {
+    return JSON.stringify({
+      uid,
+      grantedBy: granter,
+      indefinite: true,
+      minutes: 0,
+      grantedAt: nowMs,
+      expiresAt: null
+    });
+  }
+
+  const minutes = normalizeTempAdminMinutes(minutesValue);
   const maxAllowedExpiryMs = nowMs + MAX_TEMP_ADMIN_MINUTES * 60 * 1000;
   const requestedExpiryMs = nowMs + minutes * 60 * 1000;
   const expiresAtMs = Math.min(maxAllowedExpiryMs, requestedExpiryMs);
@@ -825,6 +990,7 @@ function buildEncodedTempAdminGrant(targetUid, minutesValue, grantedByUid) {
   return JSON.stringify({
     uid,
     grantedBy: granter,
+    indefinite: false,
     minutes,
     grantedAt: nowMs,
     expiresAt: expiresAtMs
@@ -845,14 +1011,27 @@ function parseTempAdminGrantFromFields(fieldsObj, expectedUid = "") {
     const uid = sanitizeTargetUid(parsed.uid);
     const grantedBy = sanitizeTargetUid(parsed.grantedBy);
     const grantedAt = Number(parsed.grantedAt);
-    const expiresAt = Number(parsed.expiresAt);
-    const minutes = normalizeTempAdminMinutes(parsed.minutes);
-
-    if (!uid || grantedBy !== ADMIN_UID || !Number.isFinite(expiresAt)) return null;
-    if (expectedUid && uid !== expectedUid) return null;
-
     const nowMs = Date.now();
     const baseTime = Number.isFinite(grantedAt) ? grantedAt : nowMs;
+
+    if (!uid || grantedBy !== ADMIN_UID) return null;
+    if (expectedUid && uid !== expectedUid) return null;
+
+    if (parsed.indefinite === true || parsed.expiresAt === null) {
+      return {
+        uid,
+        grantedBy,
+        indefinite: true,
+        minutes: 0,
+        grantedAt: baseTime,
+        expiresAt: null
+      };
+    }
+
+    const expiresAt = Number(parsed.expiresAt);
+    const minutes = normalizeTempAdminMinutes(parsed.minutes);
+    if (!Number.isFinite(expiresAt)) return null;
+
     const hardCapMs = baseTime + MAX_TEMP_ADMIN_MINUTES * 60 * 1000;
     const effectiveExpiryMs = Math.min(expiresAt, hardCapMs);
 
@@ -863,6 +1042,7 @@ function parseTempAdminGrantFromFields(fieldsObj, expectedUid = "") {
     return {
       uid,
       grantedBy,
+      indefinite: false,
       minutes,
       grantedAt: baseTime,
       expiresAt: effectiveExpiryMs
@@ -878,7 +1058,9 @@ function scheduleTempAdminExpiryCheck() {
     state.tempAdminExpiryTimer = null;
   }
 
-  if (!state.tempAdminGrant || !Number.isFinite(state.tempAdminGrant.expiresAt)) return;
+  if (!state.tempAdminGrant) return;
+  if (state.tempAdminGrant.indefinite || state.tempAdminGrant.expiresAt === null) return;
+  if (!Number.isFinite(state.tempAdminGrant.expiresAt)) return;
 
   const remainingMs = state.tempAdminGrant.expiresAt - Date.now();
   if (remainingMs <= 0) {
@@ -889,7 +1071,7 @@ function scheduleTempAdminExpiryCheck() {
 
   state.tempAdminExpiryTimer = setTimeout(() => {
     state.tempAdminExpiryTimer = null;
-    if (state.tempAdminGrant && Date.now() >= state.tempAdminGrant.expiresAt) {
+    if (state.tempAdminGrant && !state.tempAdminGrant.indefinite && Date.now() >= state.tempAdminGrant.expiresAt) {
       state.tempAdminGrant = null;
       if (state.adminActiveCommand === "/admin") {
         state.adminActiveCommand = "";
@@ -907,7 +1089,11 @@ function isMasterAdmin() {
 function hasActiveTempAdminRole() {
   if (!state.user || !state.user.uid) return false;
   if (isMasterAdmin()) return false;
-  if (!state.tempAdminGrant || Date.now() >= (state.tempAdminGrant.expiresAt || 0)) {
+  if (!state.tempAdminGrant) return false;
+  if (state.tempAdminGrant.indefinite || state.tempAdminGrant.expiresAt === null) {
+    return state.tempAdminGrant.uid === state.user.uid;
+  }
+  if (Date.now() >= (state.tempAdminGrant.expiresAt || 0)) {
     state.tempAdminGrant = null;
     return false;
   }
@@ -923,7 +1109,7 @@ function isInspectionReadOnlyActive() {
 }
 
 /* --------------------------------------------------------------------------
-   Mensagens Temporárias do Admin por UID ou Global (Normal/Urgente até 24h)
+   Mensagens Temporárias ou Indeterminadas do Admin por UID ou Global
    -------------------------------------------------------------------------- */
 function normalizeNoticeMinutes(rawMinutes) {
   const num = Number(rawMinutes);
@@ -935,7 +1121,10 @@ function normalizeNoticePriority(rawPriority) {
   return rawPriority === "urgent" ? "urgent" : "normal";
 }
 
-function formatDurationLabel(minutes) {
+function formatDurationLabel(minutes, indefinite = false) {
+  if (indefinite) {
+    return "tempo indeterminado";
+  }
   const safeMin = normalizeNoticeMinutes(minutes);
   if (safeMin < 60) {
     return `${safeMin} min`;
@@ -945,26 +1134,51 @@ function formatDurationLabel(minutes) {
   return remMinutes === 0 ? `${wholeHours}h` : `${wholeHours}h ${remMinutes}min`;
 }
 
-function formatRemainingTimeLabel(expiresAtMs) {
+function formatRemainingTimeLabel(expiresAtMs, indefinite = false) {
+  if (indefinite || expiresAtMs === null) {
+    return "sem prazo de expiração";
+  }
   const diffMs = Number(expiresAtMs) - Date.now();
   if (!Number.isFinite(diffMs) || diffMs <= 0) return "expirado";
   const totalMin = Math.max(1, Math.ceil(diffMs / 60000));
-  return `restam ~${formatDurationLabel(totalMin)}`;
+  return `restam ~${formatDurationLabel(totalMin, false)}`;
 }
 
-function buildEncodedNoticePayload(messageText, minutesValue, priorityValue = "normal", scope = "uid") {
+function isNoticeActiveNow(notice) {
+  if (!notice || !notice.msg) return false;
+  if (notice.indefinite || notice.expiresAt === null) return true;
+  return Date.now() < Number(notice.expiresAt);
+}
+
+function buildEncodedNoticePayload(messageText, minutesValue, priorityValue = "normal", scope = "uid", indefinite = false) {
   const cleanText = sanitizeText(String(messageText ?? ""), 600).trim();
   if (!cleanText) return "";
 
-  const minutes = normalizeNoticeMinutes(minutesValue);
+  const isIndefinite = Boolean(indefinite);
   const priority = normalizeNoticePriority(priorityValue);
   const nowMs = Date.now();
+
+  if (isIndefinite) {
+    return JSON.stringify({
+      msg: cleanText,
+      indefinite: true,
+      minutes: 0,
+      hours: 0,
+      priority,
+      scope: scope === "all" ? "all" : "uid",
+      sentAt: nowMs,
+      expiresAt: null
+    });
+  }
+
+  const minutes = normalizeNoticeMinutes(minutesValue);
   const maxAllowedExpiryMs = nowMs + MAX_NOTICE_MINUTES * 60 * 1000;
   const requestedExpiryMs = nowMs + minutes * 60 * 1000;
   const expiresAtMs = Math.min(maxAllowedExpiryMs, requestedExpiryMs);
 
   return JSON.stringify({
     msg: cleanText,
+    indefinite: false,
     minutes,
     hours: Number((minutes / 60).toFixed(2)),
     priority,
@@ -983,16 +1197,30 @@ function parseNoticeObject(raw, fallbackScope = "uid") {
 
     const cleanMsg = sanitizeText(String(parsed.msg ?? ""), 600).trim();
     const sentAt = Number(parsed.sentAt);
+    const priority = normalizeNoticePriority(parsed.priority);
+    const scope = parsed.scope === "all" ? "all" : fallbackScope;
+
+    if (!cleanMsg) return null;
+
+    if (parsed.indefinite === true || parsed.expiresAt === null) {
+      return {
+        msg: cleanMsg,
+        indefinite: true,
+        minutes: 0,
+        priority,
+        scope,
+        expiresAt: null
+      };
+    }
+
     const expiresAt = Number(parsed.expiresAt);
     const rawMin =
       parsed.minutes !== undefined && parsed.minutes !== null
         ? parsed.minutes
         : Number(parsed.hours) * 60;
     const minutes = normalizeNoticeMinutes(rawMin);
-    const priority = normalizeNoticePriority(parsed.priority);
-    const scope = parsed.scope === "all" ? "all" : fallbackScope;
 
-    if (!cleanMsg || !Number.isFinite(expiresAt)) return null;
+    if (!Number.isFinite(expiresAt)) return null;
 
     const nowMs = Date.now();
     const hardCapMs = (Number.isFinite(sentAt) ? sentAt : nowMs) + MAX_NOTICE_MINUTES * 60 * 1000;
@@ -1004,6 +1232,7 @@ function parseNoticeObject(raw, fallbackScope = "uid") {
 
     return {
       msg: cleanMsg,
+      indefinite: false,
       minutes,
       priority,
       scope,
@@ -1021,13 +1250,13 @@ function parseActiveNoticeFromFields(fieldsObj) {
 }
 
 function getEffectiveDisplayedNotice() {
-  const now = Date.now();
-  const uidNotice =
-    state.activeNotice && now < (state.activeNotice.expiresAt || 0) ? state.activeNotice : null;
-  const globalNotice =
-    state.globalNotice && now < (state.globalNotice.expiresAt || 0) ? state.globalNotice : null;
+  const uidNotice = isNoticeActiveNow(state.activeNotice) ? state.activeNotice : null;
+  const globalNotice = isNoticeActiveNow(state.globalNotice) ? state.globalNotice : null;
 
   if (uidNotice && globalNotice) {
+    if (uidNotice.indefinite && !globalNotice.indefinite) return uidNotice;
+    if (globalNotice.indefinite && !uidNotice.indefinite) return globalNotice;
+    if (uidNotice.indefinite && globalNotice.indefinite) return uidNotice;
     return uidNotice.expiresAt >= globalNotice.expiresAt ? uidNotice : globalNotice;
   }
   return uidNotice || globalNotice || null;
@@ -1041,16 +1270,24 @@ function scheduleNoticeExpiryCheck() {
 
   const now = Date.now();
   const expiries = [];
-  if (state.activeNotice && state.activeNotice.expiresAt > now) expiries.push(state.activeNotice.expiresAt);
-  if (state.globalNotice && state.globalNotice.expiresAt > now) expiries.push(state.globalNotice.expiresAt);
+  if (state.activeNotice && !state.activeNotice.indefinite && Number(state.activeNotice.expiresAt) > now) {
+    expiries.push(Number(state.activeNotice.expiresAt));
+  }
+  if (state.globalNotice && !state.globalNotice.indefinite && Number(state.globalNotice.expiresAt) > now) {
+    expiries.push(Number(state.globalNotice.expiresAt));
+  }
 
   if (!expiries.length) return;
 
   const nearestExpiry = Math.min(...expiries);
   const remainingMs = nearestExpiry - now;
   if (remainingMs <= 0) {
-    if (state.activeNotice && now >= state.activeNotice.expiresAt) state.activeNotice = null;
-    if (state.globalNotice && now >= state.globalNotice.expiresAt) state.globalNotice = null;
+    if (state.activeNotice && !state.activeNotice.indefinite && now >= Number(state.activeNotice.expiresAt)) {
+      state.activeNotice = null;
+    }
+    if (state.globalNotice && !state.globalNotice.indefinite && now >= Number(state.globalNotice.expiresAt)) {
+      state.globalNotice = null;
+    }
     renderPlayerNoticeBanner();
     renderAdminCommandFunctionsBelow();
     return;
@@ -1059,8 +1296,12 @@ function scheduleNoticeExpiryCheck() {
   state.noticeExpiryTimer = setTimeout(() => {
     state.noticeExpiryTimer = null;
     const checkNow = Date.now();
-    if (state.activeNotice && checkNow >= state.activeNotice.expiresAt) state.activeNotice = null;
-    if (state.globalNotice && checkNow >= state.globalNotice.expiresAt) state.globalNotice = null;
+    if (state.activeNotice && !state.activeNotice.indefinite && checkNow >= Number(state.activeNotice.expiresAt)) {
+      state.activeNotice = null;
+    }
+    if (state.globalNotice && !state.globalNotice.indefinite && checkNow >= Number(state.globalNotice.expiresAt)) {
+      state.globalNotice = null;
+    }
     renderPlayerNoticeBanner();
     renderAdminCommandFunctionsBelow();
     scheduleNoticeExpiryCheck();
@@ -1091,15 +1332,7 @@ function renderPlayerNoticeBanner() {
     ? "rgba(62, 22, 28, 0.96)"
     : "rgba(34, 42, 54, 0.96)";
 
-  const expDate = new Date(currentNotice.expiresAt);
-  const expFormatted = expDate.toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-
-  activeBanner.innerHTML = "";
+  activeBanner.replaceChildren();
 
   const header = document.createElement("div");
   header.style.cssText = "display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; margin-bottom: 6px;";
@@ -1119,7 +1352,18 @@ function renderPlayerNoticeBanner() {
     : "color: #ffe082; font-size: 13px;";
 
   const meta = document.createElement("span");
-  meta.textContent = `Duração: ${formatDurationLabel(currentNotice.minutes)} (${formatRemainingTimeLabel(currentNotice.expiresAt)} · expira em ${expFormatted})`;
+  if (currentNotice.indefinite || currentNotice.expiresAt === null) {
+    meta.textContent = "Duração: Tempo indeterminado (sem expiração automática)";
+  } else {
+    const expDate = new Date(currentNotice.expiresAt);
+    const expFormatted = expDate.toLocaleString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+    meta.textContent = `Duração: ${formatDurationLabel(currentNotice.minutes, false)} (${formatRemainingTimeLabel(currentNotice.expiresAt, false)} · expira em ${expFormatted})`;
+  }
   meta.style.cssText = "color: #d6dee6; font-size: 12px;";
 
   const body = document.createElement("p");
@@ -1384,6 +1628,21 @@ function resolveCommandNameFromInput(rawInput) {
   return found ? found.cmd : normalizedToken;
 }
 
+function styleIndefiniteButton(btn, isActive) {
+  btn.textContent = isActive ? "Tempo indeterminado: ATIVO" : "Tempo indeterminado";
+  btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+  btn.style.cssText = [
+    "padding: 7px 11px",
+    "border-radius: 7px",
+    "font-size: 12px",
+    "font-weight: 700",
+    "cursor: pointer",
+    isActive
+      ? "border: 1px solid #72efb3; background: rgba(114,239,179,0.2); color: #72efb3;"
+      : "border: 1px solid rgba(255,217,102,0.45); background: transparent; color: #ffd966;"
+  ].join(";");
+}
+
 function renderActiveCommandsStrip() {
   const strip = document.getElementById("admin-all-commands-box");
   const toggleBtn = document.getElementById("admin-toggle-all-cmds-btn");
@@ -1402,12 +1661,12 @@ function renderActiveCommandsStrip() {
 
   if (!state.adminAllCommandsActive) {
     strip.hidden = true;
-    strip.innerHTML = "";
+    strip.replaceChildren();
     return;
   }
 
   strip.hidden = false;
-  strip.innerHTML = "";
+  strip.replaceChildren();
 
   const header = document.createElement("div");
   header.textContent = isMasterAdmin()
@@ -1465,13 +1724,13 @@ function renderAdminCommandFunctionsBelow() {
   const cmd = state.adminActiveCommand;
   if (!cmd) {
     box.hidden = true;
-    box.innerHTML = "";
+    box.replaceChildren();
     return;
   }
 
   if (cmd === "/admin" && !isMasterAdmin()) {
     box.hidden = false;
-    box.innerHTML = "";
+    box.replaceChildren();
     const denied = document.createElement("div");
     denied.textContent =
       "Administrador temporário não pode adicionar ou remover administradores.";
@@ -1481,7 +1740,7 @@ function renderAdminCommandFunctionsBelow() {
   }
 
   box.hidden = false;
-  box.innerHTML = "";
+  box.replaceChildren();
 
   const titleRow = document.createElement("div");
   titleRow.style.cssText = "display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;";
@@ -1526,34 +1785,49 @@ function renderAdminCommandFunctionsBelow() {
       const optionEl = document.createElement("option");
       optionEl.value = String(opt.minutes);
       optionEl.textContent = opt.label;
-      if (normalizeTempAdminMinutes(state.adminDraftTempAdminMinutes) === opt.minutes) {
+      if (!state.adminDraftTempAdminIndefinite && normalizeTempAdminMinutes(state.adminDraftTempAdminMinutes) === opt.minutes) {
         optionEl.selected = true;
       }
       durSelect.appendChild(optionEl);
     });
+    durSelect.disabled = Boolean(state.adminDraftTempAdminIndefinite);
+    durSelect.style.opacity = state.adminDraftTempAdminIndefinite ? "0.5" : "1";
     durSelect.addEventListener("change", () => {
+      state.adminDraftTempAdminIndefinite = false;
       state.adminDraftTempAdminMinutes = normalizeTempAdminMinutes(durSelect.value);
+    });
+
+    const indefiniteBtn = document.createElement("button");
+    indefiniteBtn.type = "button";
+    styleIndefiniteButton(indefiniteBtn, Boolean(state.adminDraftTempAdminIndefinite));
+    indefiniteBtn.addEventListener("click", () => {
+      state.adminDraftTempAdminIndefinite = !state.adminDraftTempAdminIndefinite;
+      styleIndefiniteButton(indefiniteBtn, state.adminDraftTempAdminIndefinite);
+      durSelect.disabled = state.adminDraftTempAdminIndefinite;
+      durSelect.style.opacity = state.adminDraftTempAdminIndefinite ? "0.5" : "1";
     });
 
     const grantBtn = document.createElement("button");
     grantBtn.type = "button";
-    grantBtn.textContent = "Conceder admin (até 24h)";
+    grantBtn.textContent = state.adminDraftTempAdminIndefinite ? "Conceder (tempo indeterminado)" : "Conceder admin (até 24h)";
     grantBtn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: none; background: #c48b1b; color: #111; font-weight: 700; font-size: 12px; cursor: pointer;";
     grantBtn.addEventListener("click", () =>
       handleAdminGrantTempRole({
         uid: uidInput.value,
-        minutes: durSelect.value
+        minutes: durSelect.value,
+        indefinite: state.adminDraftTempAdminIndefinite
       })
     );
 
     row.appendChild(uidInput);
     row.appendChild(durSelect);
+    row.appendChild(indefiniteBtn);
     row.appendChild(grantBtn);
     box.appendChild(row);
 
     const note = document.createElement("div");
     note.textContent =
-      "Concedido por até 24h. O administrador temporário não terá opção para adicionar ou remover administradores.";
+      "No painel mestre você pode escolher um tempo de até 24h ou ativar 'Tempo indeterminado'. O administrador temporário não terá opção para adicionar ou remover administradores.";
     note.style.cssText = "margin-top: 7px; font-size: 11px; color: #b8c2cc;";
     box.appendChild(note);
     return;
@@ -1622,6 +1896,10 @@ function renderAdminCommandFunctionsBelow() {
   ) {
     const isAllCmd = cmd === "/todos" || cmd === "/todosurgente";
     const isUrgentCmd = cmd === "/urgente" || cmd === "/todosurgente";
+    const canChooseIndefinite = isMasterAdmin();
+    if (!canChooseIndefinite) {
+      state.adminDraftNoticeIndefinite = false;
+    }
 
     const row = document.createElement("div");
     row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
@@ -1680,10 +1958,15 @@ function renderAdminCommandFunctionsBelow() {
       const optionEl = document.createElement("option");
       optionEl.value = String(opt.minutes);
       optionEl.textContent = opt.label;
-      if (Number(state.adminDraftNoticeMinutes) === opt.minutes) optionEl.selected = true;
+      if (!state.adminDraftNoticeIndefinite && Number(state.adminDraftNoticeMinutes) === opt.minutes) {
+        optionEl.selected = true;
+      }
       durSelect.appendChild(optionEl);
     });
+    durSelect.disabled = Boolean(state.adminDraftNoticeIndefinite);
+    durSelect.style.opacity = state.adminDraftNoticeIndefinite ? "0.5" : "1";
     durSelect.addEventListener("change", () => {
+      state.adminDraftNoticeIndefinite = false;
       state.adminDraftNoticeMinutes = normalizeNoticeMinutes(durSelect.value);
     });
 
@@ -1698,6 +1981,7 @@ function renderAdminCommandFunctionsBelow() {
       handleAdminSendNotice({
         text: msgInput.value,
         minutes: durSelect.value,
+        indefinite: canChooseIndefinite && state.adminDraftNoticeIndefinite,
         priority: prioSelect.value,
         broadcastAll: scopeSelect.value === "all"
       })
@@ -1715,6 +1999,20 @@ function renderAdminCommandFunctionsBelow() {
     row.appendChild(scopeSelect);
     row.appendChild(prioSelect);
     row.appendChild(durSelect);
+
+    if (canChooseIndefinite) {
+      const indefiniteBtn = document.createElement("button");
+      indefiniteBtn.type = "button";
+      styleIndefiniteButton(indefiniteBtn, Boolean(state.adminDraftNoticeIndefinite));
+      indefiniteBtn.addEventListener("click", () => {
+        state.adminDraftNoticeIndefinite = !state.adminDraftNoticeIndefinite;
+        styleIndefiniteButton(indefiniteBtn, state.adminDraftNoticeIndefinite);
+        durSelect.disabled = state.adminDraftNoticeIndefinite;
+        durSelect.style.opacity = state.adminDraftNoticeIndefinite ? "0.5" : "1";
+      });
+      row.appendChild(indefiniteBtn);
+    }
+
     row.appendChild(sendBtn);
     row.appendChild(clearBtn);
     box.appendChild(row);
@@ -1722,19 +2020,17 @@ function renderAdminCommandFunctionsBelow() {
     const preview = document.createElement("div");
     preview.style.cssText = "margin-top: 8px; font-size: 12px; color: #ffe082; display: flex; flex-direction: column; gap: 3px;";
 
-    const uidActive =
-      state.activeNotice && Date.now() < (state.activeNotice.expiresAt || 0) ? state.activeNotice : null;
-    const globalActive =
-      state.globalNotice && Date.now() < (state.globalNotice.expiresAt || 0) ? state.globalNotice : null;
+    const uidActive = isNoticeActiveNow(state.activeNotice) ? state.activeNotice : null;
+    const globalActive = isNoticeActiveNow(state.globalNotice) ? state.globalNotice : null;
 
     const uidLine = document.createElement("div");
     uidLine.textContent = uidActive
-      ? `Recado no UID alvo ${uidActive.priority === "urgent" ? "[URGENTE]" : "[Normal]"} (${formatRemainingTimeLabel(uidActive.expiresAt)}): "${uidActive.msg}"`
+      ? `Recado no UID alvo ${uidActive.priority === "urgent" ? "[URGENTE]" : "[Normal]"} (${formatRemainingTimeLabel(uidActive.expiresAt, uidActive.indefinite)}): "${uidActive.msg}"`
       : "Recado no UID alvo: nenhum ativo.";
 
     const globalLine = document.createElement("div");
     globalLine.textContent = globalActive
-      ? `Aviso GLOBAL (todos os jogadores) ${globalActive.priority === "urgent" ? "[URGENTE]" : "[Normal]"} (${formatRemainingTimeLabel(globalActive.expiresAt)}): "${globalActive.msg}"`
+      ? `Aviso GLOBAL (todos os jogadores) ${globalActive.priority === "urgent" ? "[URGENTE]" : "[Normal]"} (${formatRemainingTimeLabel(globalActive.expiresAt, globalActive.indefinite)}): "${globalActive.msg}"`
       : "Aviso GLOBAL (todos os jogadores): nenhum ativo.";
 
     preview.appendChild(uidLine);
@@ -1958,7 +2254,7 @@ function updateAdminBarUI() {
   if (activeBadge) {
     const modeLabel = state.adminReadOnly ? " · SOMENTE LEITURA" : " · Edição ativa";
     if (hasActiveTempAdminRole()) {
-      const rem = formatRemainingTimeLabel(state.tempAdminGrant.expiresAt);
+      const rem = formatRemainingTimeLabel(state.tempAdminGrant.expiresAt, state.tempAdminGrant.indefinite);
       activeBadge.textContent = `Admin Temporário (${rem}, sem add/remover admin)${modeLabel}`;
     } else if (state.adminTargetUid && state.adminTargetUid !== state.user.uid) {
       activeBadge.textContent = `Alvo: ${state.adminTargetUid}${modeLabel}`;
@@ -2038,7 +2334,7 @@ function ensureAdminBarElement() {
   promptInput.type = "text";
   promptInput.id = "admin-prompt-input";
   promptInput.placeholder = isMasterAdmin()
-    ? "Digite um comando (ex: /todos 60 Aviso geral, /todosurgente 30 Atenção!, /recado 30 Oi, /uid, /ler, /stats)..."
+    ? "Digite um comando (ex: /todos indeterminado Aviso geral, /todosurgente 30 Atenção!, /recado 30 Oi, /uid, /ler, /stats)..."
     : "Digite um comando (ex: /todos 60 Aviso geral, /recado 30 Oi, /ler, /stats, /modelo, /diff, /json, /log)...";
   promptInput.autocomplete = "off";
   promptInput.spellcheck = false;
@@ -2136,12 +2432,17 @@ async function handleAdminGrantTempRole(overrideData) {
     return;
   }
 
+  const isIndefinite = Boolean(
+    overrideData && overrideData.indefinite !== undefined
+      ? overrideData.indefinite
+      : state.adminDraftTempAdminIndefinite
+  );
   const minutes = normalizeTempAdminMinutes(
     overrideData && overrideData.minutes !== undefined
       ? overrideData.minutes
       : state.adminDraftTempAdminMinutes
   );
-  const encodedGrant = buildEncodedTempAdminGrant(targetUid, minutes, state.user.uid);
+  const encodedGrant = buildEncodedTempAdminGrant(targetUid, minutes, state.user.uid, isIndefinite);
   if (!encodedGrant) {
     setStatusBanner("Não foi possível gerar a concessão temporária.", "error");
     return;
@@ -2171,16 +2472,18 @@ async function handleAdminGrantTempRole(overrideData) {
     });
     state.lastCloudWriteAt = Date.now();
 
+    const durationText = formatDurationLabel(minutes, isIndefinite);
     state.adminDraftTempAdminUid = "";
     state.adminDraftTempAdminMinutes = minutes;
+    state.adminDraftTempAdminIndefinite = false;
     recordRecentAdminUid(targetUid);
-    appendAdminLog(`Admin temporário (${formatDurationLabel(minutes)}) dado ao UID ${targetUid}`);
+    appendAdminLog(`Admin concedido (${durationText}) ao UID ${targetUid}`);
     renderAdminCommandFunctionsBelow();
     await recordMasterSuccessUpdate(
-      `Admin temporário de ${formatDurationLabel(minutes)} concedido ao UID ${targetUid} (sem permissão para adicionar ou remover admin)`
+      `Admin (${durationText}) concedido ao UID ${targetUid} (sem permissão para adicionar ou remover admin)`
     );
     setStatusBanner(
-      `Função de admin concedida ao UID ${targetUid} por ${formatDurationLabel(minutes)} (sem poder adicionar/remover admin).`,
+      `Função de admin concedida ao UID ${targetUid} por ${durationText} (sem poder adicionar/remover admin).`,
       "success"
     );
   } catch (err) {
@@ -2219,11 +2522,18 @@ async function handleAdminPromptSubmit(event) {
     }
     if (parts[1]) {
       const uidArg = sanitizeTargetUid(parts[1]);
-      const minArg = parts[2] !== undefined ? normalizeTempAdminMinutes(parts[2]) : MAX_TEMP_ADMIN_MINUTES;
+      const rawDur = parts[2];
+      const indefiniteArg = isMasterAdmin() && isIndefiniteToken(rawDur);
+      const minArg = indefiniteArg
+        ? 0
+        : rawDur !== undefined
+          ? normalizeTempAdminMinutes(rawDur)
+          : MAX_TEMP_ADMIN_MINUTES;
       state.adminDraftTempAdminUid = parts[1];
-      state.adminDraftTempAdminMinutes = minArg;
+      state.adminDraftTempAdminIndefinite = indefiniteArg;
+      if (!indefiniteArg) state.adminDraftTempAdminMinutes = minArg;
       if (uidArg) {
-        await handleAdminGrantTempRole({ uid: uidArg, minutes: minArg });
+        await handleAdminGrantTempRole({ uid: uidArg, minutes: minArg, indefinite: indefiniteArg });
       }
     }
     renderAdminCommandFunctionsBelow();
@@ -2255,15 +2565,24 @@ async function handleAdminPromptSubmit(event) {
     (cmd === "/recado" || cmd === "/urgente" || cmd === "/todos" || cmd === "/todosurgente") &&
     parts.length >= 3
   ) {
-    const minutes = normalizeNoticeMinutes(parts[1]);
+    const rawDurToken = parts[1];
+    const indefiniteNotice = isMasterAdmin() && isIndefiniteToken(rawDurToken);
+    const minutes = indefiniteNotice ? 0 : normalizeNoticeMinutes(rawDurToken);
     const text = parts.slice(2).join(" ");
     const broadcastAll = cmd === "/todos" || cmd === "/todosurgente";
     const priority = cmd === "/urgente" || cmd === "/todosurgente" ? "urgent" : state.adminDraftNoticePriority;
     state.adminDraftNoticeText = text;
-    state.adminDraftNoticeMinutes = minutes;
+    state.adminDraftNoticeIndefinite = indefiniteNotice;
+    if (!indefiniteNotice) state.adminDraftNoticeMinutes = minutes;
     state.adminDraftNoticePriority = priority;
     state.adminDraftNoticeTargetMode = broadcastAll ? "all" : "uid";
-    await handleAdminSendNotice({ text, minutes, priority, broadcastAll });
+    await handleAdminSendNotice({
+      text,
+      minutes,
+      indefinite: indefiniteNotice,
+      priority,
+      broadcastAll
+    });
     renderAdminCommandFunctionsBelow();
     return;
   }
@@ -2495,6 +2814,12 @@ async function handleAdminSendNotice(overrideData) {
   const rawText = overrideData && overrideData.text !== undefined ? overrideData.text : state.adminDraftNoticeText;
   const rawMin = overrideData && overrideData.minutes !== undefined ? overrideData.minutes : state.adminDraftNoticeMinutes;
   const rawPrio = overrideData && overrideData.priority !== undefined ? overrideData.priority : state.adminDraftNoticePriority;
+  const isIndefinite = Boolean(
+    isMasterAdmin() &&
+      (overrideData && overrideData.indefinite !== undefined
+        ? overrideData.indefinite
+        : state.adminDraftNoticeIndefinite)
+  );
 
   const minutes = normalizeNoticeMinutes(rawMin);
   const priority = normalizeNoticePriority(rawPrio);
@@ -2502,13 +2827,15 @@ async function handleAdminSendNotice(overrideData) {
     rawText,
     minutes,
     priority,
-    broadcastAll ? "all" : "uid"
+    broadcastAll ? "all" : "uid",
+    isIndefinite
   );
   if (!encodedPayload) {
     setStatusBanner("Escreva uma mensagem antes de enviar.", "warning");
     return;
   }
 
+  const durationLabel = formatDurationLabel(minutes, isIndefinite);
   const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
 
   if (broadcastAll) {
@@ -2523,19 +2850,20 @@ async function handleAdminSendNotice(overrideData) {
       });
       state.lastCloudWriteAt = Date.now();
       state.adminDraftNoticeText = "";
+      state.adminDraftNoticeIndefinite = false;
       state.globalNotice = parseNoticeObject(encodedPayload, "all");
       scheduleNoticeExpiryCheck();
       renderPlayerNoticeBanner();
       renderAdminCommandFunctionsBelow();
 
       appendAdminLog(
-        `Aviso GLOBAL (${priority === "urgent" ? "Urgente" : "Normal"}, ${formatDurationLabel(minutes)}) enviado para TODOS os jogadores`
+        `Aviso GLOBAL (${priority === "urgent" ? "Urgente" : "Normal"}, ${durationLabel}) enviado para TODOS os jogadores`
       );
       await recordMasterSuccessUpdate(
-        `Aviso GLOBAL (${priority === "urgent" ? "Urgente" : "Normal"}, ${formatDurationLabel(minutes)}) enviado para todos os jogadores`
+        `Aviso GLOBAL (${priority === "urgent" ? "Urgente" : "Normal"}, ${durationLabel}) enviado para todos os jogadores`
       );
       setStatusBanner(
-        `Mensagem enviada para TODOS os jogadores (duração: ${formatDurationLabel(minutes)}).`,
+        `Mensagem enviada para TODOS os jogadores (duração: ${durationLabel}).`,
         "success"
       );
     } catch (err) {
@@ -2590,6 +2918,7 @@ async function handleAdminSendNotice(overrideData) {
     state.lastCloudWriteAt = Date.now();
 
     state.adminDraftNoticeText = "";
+    state.adminDraftNoticeIndefinite = false;
     if (getActiveTargetUid() === targetUid) {
       state.activeNotice = parseActiveNoticeFromFields(nextFields);
       scheduleNoticeExpiryCheck();
@@ -2597,12 +2926,12 @@ async function handleAdminSendNotice(overrideData) {
     }
 
     renderAdminCommandFunctionsBelow();
-    appendAdminLog(`Recado (${priority === "urgent" ? "Urgente" : "Normal"}, ${formatDurationLabel(minutes)}) enviado para ${targetUid}`);
+    appendAdminLog(`Recado (${priority === "urgent" ? "Urgente" : "Normal"}, ${durationLabel}) enviado para ${targetUid}`);
     await recordMasterSuccessUpdate(
-      `Recado (${priority === "urgent" ? "Urgente" : "Normal"}, ${formatDurationLabel(minutes)}) enviado para o UID ${targetUid}`
+      `Recado (${priority === "urgent" ? "Urgente" : "Normal"}, ${durationLabel}) enviado para o UID ${targetUid}`
     );
     setStatusBanner(
-      `Mensagem enviada para o UID ${targetUid} (duração: ${formatDurationLabel(minutes)}).`,
+      `Mensagem enviada para o UID ${targetUid} (duração: ${durationLabel}).`,
       "success"
     );
   } catch (err) {
@@ -2984,6 +3313,8 @@ function enterOfflineTemporaryMode() {
   state.activeNotice = null;
   state.globalNotice = null;
   state.tempAdminGrant = null;
+  state.adminDraftNoticeIndefinite = false;
+  state.adminDraftTempAdminIndefinite = false;
   state.masterUpdateNotice = null;
   state.masterReleaseNotice = null;
   scheduleTempAdminExpiryCheck();
@@ -3047,34 +3378,58 @@ function collectSheetData() {
     }
   });
 
-  if (state.activeNotice && Date.now() < (state.activeNotice.expiresAt || 0)) {
-    const remainingMinutes = Math.max(
-      1,
-      Math.min(MAX_NOTICE_MINUTES, Math.ceil((state.activeNotice.expiresAt - Date.now()) / 60000))
-    );
-    const reEncoded = buildEncodedNoticePayload(
-      state.activeNotice.msg,
-      remainingMinutes,
-      state.activeNotice.priority,
-      "uid"
-    );
-    if (reEncoded) {
-      fields[ADMIN_NOTICE_FIELD_KEY] = reEncoded;
+  if (isNoticeActiveNow(state.activeNotice)) {
+    if (state.activeNotice.indefinite || state.activeNotice.expiresAt === null) {
+      const reEncoded = buildEncodedNoticePayload(
+        state.activeNotice.msg,
+        0,
+        state.activeNotice.priority,
+        "uid",
+        true
+      );
+      if (reEncoded) fields[ADMIN_NOTICE_FIELD_KEY] = reEncoded;
+    } else {
+      const remainingMinutes = Math.max(
+        1,
+        Math.min(MAX_NOTICE_MINUTES, Math.ceil((state.activeNotice.expiresAt - Date.now()) / 60000))
+      );
+      const reEncoded = buildEncodedNoticePayload(
+        state.activeNotice.msg,
+        remainingMinutes,
+        state.activeNotice.priority,
+        "uid",
+        false
+      );
+      if (reEncoded) {
+        fields[ADMIN_NOTICE_FIELD_KEY] = reEncoded;
+      }
     }
   }
 
-  if (state.tempAdminGrant && Date.now() < (state.tempAdminGrant.expiresAt || 0)) {
-    const remainingMin = Math.max(
-      1,
-      Math.min(MAX_TEMP_ADMIN_MINUTES, Math.ceil((state.tempAdminGrant.expiresAt - Date.now()) / 60000))
-    );
-    fields[TEMP_ADMIN_GRANT_FIELD_KEY] = JSON.stringify({
-      uid: state.tempAdminGrant.uid,
-      grantedBy: ADMIN_UID,
-      minutes: remainingMin,
-      grantedAt: state.tempAdminGrant.grantedAt,
-      expiresAt: state.tempAdminGrant.expiresAt
-    });
+  if (state.tempAdminGrant) {
+    if (state.tempAdminGrant.indefinite || state.tempAdminGrant.expiresAt === null) {
+      fields[TEMP_ADMIN_GRANT_FIELD_KEY] = JSON.stringify({
+        uid: state.tempAdminGrant.uid,
+        grantedBy: ADMIN_UID,
+        indefinite: true,
+        minutes: 0,
+        grantedAt: state.tempAdminGrant.grantedAt,
+        expiresAt: null
+      });
+    } else if (Date.now() < Number(state.tempAdminGrant.expiresAt)) {
+      const remainingMin = Math.max(
+        1,
+        Math.min(MAX_TEMP_ADMIN_MINUTES, Math.ceil((state.tempAdminGrant.expiresAt - Date.now()) / 60000))
+      );
+      fields[TEMP_ADMIN_GRANT_FIELD_KEY] = JSON.stringify({
+        uid: state.tempAdminGrant.uid,
+        grantedBy: ADMIN_UID,
+        indefinite: false,
+        minutes: remainingMin,
+        grantedAt: state.tempAdminGrant.grantedAt,
+        expiresAt: state.tempAdminGrant.expiresAt
+      });
+    }
   }
 
   if (state.masterUpdateNotice && state.masterUpdateNotice.ok) {
@@ -3102,12 +3457,13 @@ function buildSanitizedCloudPayload() {
         if (parsedNotice) {
           cleanFields[key] = JSON.stringify({
             msg: parsedNotice.msg,
-            minutes: parsedNotice.minutes,
-            hours: Number((parsedNotice.minutes / 60).toFixed(2)),
+            indefinite: Boolean(parsedNotice.indefinite || parsedNotice.expiresAt === null),
+            minutes: parsedNotice.indefinite ? 0 : parsedNotice.minutes,
+            hours: parsedNotice.indefinite ? 0 : Number((parsedNotice.minutes / 60).toFixed(2)),
             priority: parsedNotice.priority,
             scope: "uid",
             sentAt: Date.now(),
-            expiresAt: parsedNotice.expiresAt
+            expiresAt: parsedNotice.indefinite ? null : parsedNotice.expiresAt
           });
         }
         continue;
@@ -3174,12 +3530,14 @@ function applySheetData(data, expectedUidForGrant = "") {
   if (expectedUidForGrant === ADMIN_UID) {
     state.tempAdminGrant = null;
     scheduleTempAdminExpiryCheck();
-    state.masterUpdateNotice = parseMasterUpdateLogFromFields(data.fields);
+    const parsedMasterLog = parseMasterUpdateLogFromFields(data.fields);
+    if (parsedMasterLog) {
+      state.masterUpdateNotice = parsedMasterLog;
+    }
     renderMasterUpdateBanner();
   } else if (expectedUidForGrant) {
     state.tempAdminGrant = parseTempAdminGrantFromFields(data.fields, expectedUidForGrant);
     scheduleTempAdminExpiryCheck();
-    state.masterUpdateNotice = null;
     renderMasterUpdateBanner();
   }
 
@@ -3397,12 +3755,15 @@ async function initFirebase() {
         } else {
           state.masterUpdateNotice = null;
           state.masterReleaseNotice = null;
+          state.autoSyncDoneForSession = false;
           state.adminTargetUid = "";
           state.adminDraftUid = "";
           state.adminRecentUids = [];
           state.adminReadOnly = false;
           state.adminActiveCommand = "";
           state.adminAllCommandsActive = false;
+          state.adminDraftNoticeIndefinite = false;
+          state.adminDraftTempAdminIndefinite = false;
           saveAdminTargetUidToStorage("");
         }
         clearAuthSensitiveInputs();
@@ -3410,12 +3771,15 @@ async function initFirebase() {
       } else {
         state.masterUpdateNotice = null;
         state.masterReleaseNotice = null;
+        state.autoSyncDoneForSession = false;
         state.adminTargetUid = "";
         state.adminDraftUid = "";
         state.adminRecentUids = [];
         state.adminReadOnly = false;
         state.adminActiveCommand = "";
         state.adminAllCommandsActive = false;
+        state.adminDraftNoticeIndefinite = false;
+        state.adminDraftTempAdminIndefinite = false;
         state.activeNotice = null;
         state.globalNotice = null;
         state.tempAdminGrant = null;
@@ -3447,14 +3811,18 @@ async function initFirebase() {
                 firestoreMod.doc(state.db, FIRESTORE_COLLECTION, ADMIN_UID)
               );
               if (masterSnap.exists()) {
-                state.masterUpdateNotice = parseMasterUpdateLogFromFields(
-                  masterSnap.data()?.fields
-                );
+                const fetchedLog = parseMasterUpdateLogFromFields(masterSnap.data()?.fields);
+                if (fetchedLog) {
+                  state.masterUpdateNotice = fetchedLog;
+                }
                 renderMasterUpdateBanner();
               }
             } catch {
               // Ignora falha ao buscar log master
             }
+          }
+          if (isMasterAdmin()) {
+            await syncAutoDetectedChangesToAdminNotice();
           }
         }
       } else if (!state.isDeleting && !state.offlineMode) {
@@ -3493,7 +3861,7 @@ async function loadFromFirestore(uid) {
     } else {
       state.activeNotice = null;
       state.tempAdminGrant = null;
-      if (uid === ADMIN_UID) state.masterUpdateNotice = null;
+      if (uid === ADMIN_UID && !state.masterUpdateNotice) state.masterUpdateNotice = null;
       scheduleNoticeExpiryCheck();
       scheduleTempAdminExpiryCheck();
       renderMasterUpdateBanner();
@@ -3642,11 +4010,14 @@ async function handleLogout(event) {
   state.adminReadOnly = false;
   state.adminActiveCommand = "";
   state.adminAllCommandsActive = false;
+  state.adminDraftNoticeIndefinite = false;
+  state.adminDraftTempAdminIndefinite = false;
   state.activeNotice = null;
   state.globalNotice = null;
   state.tempAdminGrant = null;
   state.masterUpdateNotice = null;
   state.masterReleaseNotice = null;
+  state.autoSyncDoneForSession = false;
   scheduleNoticeExpiryCheck();
   scheduleTempAdminExpiryCheck();
   saveAdminTargetUidToStorage("");
@@ -3697,11 +4068,14 @@ async function handleDeleteAccount(event) {
     state.adminReadOnly = false;
     state.adminActiveCommand = "";
     state.adminAllCommandsActive = false;
+    state.adminDraftNoticeIndefinite = false;
+    state.adminDraftTempAdminIndefinite = false;
     state.activeNotice = null;
     state.globalNotice = null;
     state.tempAdminGrant = null;
     state.masterUpdateNotice = null;
     state.masterReleaseNotice = null;
+    state.autoSyncDoneForSession = false;
     scheduleNoticeExpiryCheck();
     scheduleTempAdminExpiryCheck();
     saveAdminTargetUidToStorage("");
@@ -4017,7 +4391,7 @@ function bindEvents() {
   }
 
   if (deleteCancelBtn && deleteConfirmBox) {
-    deleteCancelBtn.addEventListener("click", () => {
+    deleteConfirmBtn.addEventListener("click", () => {
       deleteConfirmBox.hidden = true;
     });
   }
@@ -4120,6 +4494,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initLgpdBanner();
   bindEvents();
   setActiveSectionIndicator("dados-agente");
+  detectAddedChangesAutomatically(null);
 
   const localData = loadLocalData();
   if (localData) {

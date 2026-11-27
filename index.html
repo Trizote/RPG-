@@ -200,12 +200,12 @@
             <div class="card">
               <div class="card-header azul">Vida</div>
               <div class="status-grid">
-                <div><label>Atual</label><input type="number" id="vida-atual" value="0"></div>
-                <div><label>Dano</label><input type="number" id="vida-dano" value="0"></div>
-                <div><label>Máximo</label><input type="number" id="vida-max" value="0"></div>
+                <div><label for="vida-atual">Atual</label><input type="number" id="vida-atual" value="0"></div>
+                <div><label for="vida-dano">Dano</label><input type="number" id="vida-dano" value="0"></div>
+                <div><label for="vida-max">Máximo</label><input type="number" id="vida-max" value="0"></div>
               </div>
               <div class="status-temp">
-                <label>Temporário:</label>
+                <label for="vida-temp">Temporário:</label>
                 <input type="number" id="vida-temp" value="0">
               </div>
             </div>
@@ -213,12 +213,12 @@
             <div class="card">
               <div class="card-header azul">Pontos de Esforço</div>
               <div class="status-grid">
-                <div><label>Atual</label><input type="number" id="pe-atual" value="0"></div>
-                <div><label>Gasto</label><input type="number" id="pe-gasto" value="0"></div>
-                <div><label>Máximo</label><input type="number" id="pe-max" value="0"></div>
+                <div><label for="pe-atual">Atual</label><input type="number" id="pe-atual" value="0"></div>
+                <div><label for="pe-gasto">Gasto</label><input type="number" id="pe-gasto" value="0"></div>
+                <div><label for="pe-max">Máximo</label><input type="number" id="pe-max" value="0"></div>
               </div>
               <div class="status-temp">
-                <label>Temporário:</label>
+                <label for="pe-temp">Temporário:</label>
                 <input type="number" id="pe-temp" value="0">
               </div>
             </div>
@@ -226,12 +226,12 @@
             <div class="card">
               <div class="card-header azul">Sanidade</div>
               <div class="status-grid">
-                <div><label>Atual</label><input type="number" id="san-atual" value="0"></div>
-                <div><label>Dano</label><input type="number" id="san-dano" value="0"></div>
-                <div><label>Máximo</label><input type="number" id="san-max" value="0"></div>
+                <div><label for="san-atual">Atual</label><input type="number" id="san-atual" value="0"></div>
+                <div><label for="san-dano">Dano</label><input type="number" id="san-dano" value="0"></div>
+                <div><label for="san-max">Máximo</label><input type="number" id="san-max" value="0"></div>
               </div>
               <div class="status-temp">
-                <label>Temporário:</label>
+                <label for="san-temp">Temporário:</label>
                 <input type="number" id="san-temp" value="0">
               </div>
             </div>
@@ -239,12 +239,12 @@
             <div class="card">
               <div class="card-header azul">Medo</div>
               <div class="status-grid">
-                <div><label>Atual</label><input type="number" id="medo-atual" value="0"></div>
-                <div><label>Dano</label><input type="number" id="medo-dano" value="0"></div>
-                <div><label>Máximo</label><input type="number" id="medo-max" value="0"></div>
+                <div><label for="medo-atual">Atual</label><input type="number" id="medo-atual" value="0"></div>
+                <div><label for="medo-dano">Dano</label><input type="number" id="medo-dano" value="0"></div>
+                <div><label for="medo-max">Máximo</label><input type="number" id="medo-max" value="0"></div>
               </div>
               <div class="status-temp">
-                <label>Temporário:</label>
+                <label for="medo-temp">Temporário:</label>
                 <input type="number" id="medo-temp" value="0">
               </div>
             </div>
@@ -256,26 +256,26 @@
               <div class="card-header azul">Defesa</div>
               <div class="defesa-item">
                 <span>Total</span>
-                <input type="number" id="def-total" value="11" class="destaque-num">
-                <label>Outros:</label>
+                <input type="number" id="def-total" value="11" class="destaque-num" aria-label="Defesa Total">
+                <label for="def-total-outros">Outros:</label>
                 <input type="number" id="def-total-outros" value="0">
               </div>
               <div class="defesa-item">
                 <span>Esquiva</span>
-                <input type="number" id="def-esquiva" value="11" class="destaque-num">
-                <label>Outros:</label>
+                <input type="number" id="def-esquiva" value="11" class="destaque-num" aria-label="Defesa Esquiva">
+                <label for="def-esquiva-outros">Outros:</label>
                 <input type="number" id="def-esquiva-outros" value="0">
               </div>
               <div class="defesa-item">
                 <span>Bloqueio</span>
-                <input type="number" id="def-bloqueio" value="0" class="destaque-num">
-                <label>Outros:</label>
+                <input type="number" id="def-bloqueio" value="0" class="destaque-num" aria-label="Defesa Bloqueio">
+                <label for="def-bloqueio-outros">Outros:</label>
                 <input type="number" id="def-bloqueio-outros" value="0">
               </div>
               <div class="defesa-item">
                 <span>Deslocamento</span>
-                <input type="number" id="def-deslocamento" value="9" class="destaque-num">
-                <label>Outros:</label>
+                <input type="number" id="def-deslocamento" value="9" class="destaque-num" aria-label="Defesa Deslocamento">
+                <label for="def-deslocamento-outros">Outros:</label>
                 <input type="number" id="def-deslocamento-outros" value="0">
               </div>
             </div>
@@ -286,24 +286,24 @@
             <div class="card">
               <div class="card-header azul">Atributos</div>
               <div class="atributos-grid">
-                <div class="attr-box"><label>Agi</label><input type="number" id="attr-agi" value="1"></div>
-                <div class="attr-box"><label>For</label><input type="number" id="attr-for" value="1"></div>
-                <div class="attr-box"><label>CA</label><input type="number" id="attr-ca" value="1"></div>
-                <div class="attr-box"><label>Int</label><input type="number" id="attr-int" value="1"></div>
-                <div class="attr-box"><label>Vig</label><input type="number" id="attr-vig" value="1"></div>
+                <div class="attr-box"><label for="attr-agi">Agi</label><input type="number" id="attr-agi" value="1"></div>
+                <div class="attr-box"><label for="attr-for">For</label><input type="number" id="attr-for" value="1"></div>
+                <div class="attr-box"><label for="attr-ca">CA</label><input type="number" id="attr-ca" value="1"></div>
+                <div class="attr-box"><label for="attr-int">Int</label><input type="number" id="attr-int" value="1"></div>
+                <div class="attr-box"><label for="attr-vig">Vig</label><input type="number" id="attr-vig" value="1"></div>
               </div>
             </div>
 
             <div class="card">
               <div class="card-header azul">Anotações</div>
-              <textarea id="anotacoes-gerais" rows="5" placeholder="Anotações gerais do agente..."></textarea>
+              <textarea id="anotacoes-gerais" rows="5" placeholder="Anotações gerais do agente..." aria-label="Anotações gerais do agente"></textarea>
             </div>
 
             <div class="card grid-nv">
-              <div><label>NV</label><input type="number" id="nv-val" value="1"></div>
-              <div><label>XP</label><input type="number" id="xp-val" value="0"></div>
-              <div><label>XP Atual</label><input type="number" id="xp-atual-val" value="0"></div>
-              <div class="rank-box"><label>Rank</label><input type="text" id="rank-val" value="E"></div>
+              <div><label for="nv-val">NV</label><input type="number" id="nv-val" value="1"></div>
+              <div><label for="xp-val">XP</label><input type="number" id="xp-val" value="0"></div>
+              <div><label for="xp-atual-val">XP Atual</label><input type="number" id="xp-atual-val" value="0"></div>
+              <div class="rank-box"><label for="rank-val">Rank</label><input type="text" id="rank-val" value="E"></div>
             </div>
           </div>
 
@@ -429,228 +429,228 @@
                 </thead>
                 <tbody>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Acrobacia"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Acrobacia</td>
                     <td class="attr-tag">Agilidade</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Acrobacia"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Acrobacia"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Acrobacia"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Adestramento"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Adestramento</td>
                     <td class="attr-tag">Aura</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Adestramento"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Adestramento"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Adestramento"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Artes"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Artes /</td>
                     <td class="attr-tag">Aura</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Artes"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Artes"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Artes"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Atletismo"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Atletismo</td>
                     <td class="attr-tag">Força</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Atletismo"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Atletismo"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Atletismo"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Atualidades"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Atualidades</td>
                     <td class="attr-tag">Intelecto</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Atualidades"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Atualidades"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Atualidades"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Ciências"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Ciências /</td>
                     <td class="attr-tag">Intelecto</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Ciências"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Ciências"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Ciências"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Crime"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Crime / * #</td>
                     <td class="attr-tag">Agilidade</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Crime"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Crime"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Crime"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Diplomacia"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Diplomacia</td>
                     <td class="attr-tag">Aura</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Diplomacia"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Diplomacia"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Diplomacia"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Enganação"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Enganação #</td>
                     <td class="attr-tag">Aura</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Enganação"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Enganação"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Enganação"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Fortitude"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Fortitude</td>
                     <td class="attr-tag">Vigor</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Fortitude"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Fortitude"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Fortitude"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Furtividade"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Furtividade *</td>
                     <td class="attr-tag">Agilidade</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Furtividade"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Furtividade"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Furtividade"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Iniciativa"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Iniciativa</td>
                     <td class="attr-tag">Agilidade</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Iniciativa"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Iniciativa"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Iniciativa"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Intimidação"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Intimidação</td>
                     <td class="attr-tag">Aura</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Intimidação"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Intimidação"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Intimidação"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Intuição"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Intuição</td>
                     <td class="attr-tag">Intelecto</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Intuição"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Intuição"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Intuição"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Investigação"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Investigação</td>
                     <td class="attr-tag">Intelecto</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Investigação"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Investigação"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Investigação"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Luta"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Luta</td>
                     <td class="attr-tag">Força</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Luta"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Luta"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Luta"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Medicina"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Medicina #</td>
                     <td class="attr-tag">Intelecto</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Medicina"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Medicina"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Medicina"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de NEN"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">NEN</td>
                     <td class="attr-tag">Aura</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de NEN"></td>
+                    <td><input type="number" value="0" aria-label="Outros de NEN"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de NEN"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Percepção"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Percepção</td>
                     <td class="attr-tag">Aura</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Percepção"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Percepção"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Percepção"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Pilotagem"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Pilotagem /</td>
                     <td class="attr-tag">Agilidade</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Pilotagem"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Pilotagem"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Pilotagem"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Pontaria"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Pontaria</td>
                     <td class="attr-tag">Agilidade</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Pontaria"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Pontaria"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Pontaria"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Profissão"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Profissão</td>
                     <td class="attr-tag">Intelecto</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Profissão"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Profissão"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Profissão"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Reflexos"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Reflexos</td>
                     <td class="attr-tag">Agilidade</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Reflexos"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Reflexos"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Reflexos"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Religião"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Religião</td>
                     <td class="attr-tag">Intelecto</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Religião"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Religião"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Religião"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Sobrevivência"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Sobrevivência</td>
                     <td class="attr-tag">Intelecto</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Sobrevivência"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Sobrevivência"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Sobrevivência"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Tática"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Tática</td>
                     <td class="attr-tag">Intelecto</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Tática"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Tática"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Tática"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Tecnologia"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Tecnologia # /</td>
                     <td class="attr-tag">Intelecto</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Tecnologia"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Tecnologia"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Tecnologia"></td>
                   </tr>
                   <tr>
-                    <td><select><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
+                    <td><select aria-label="Grau de Vontade"><option>Destreinado</option><option>Treinado</option><option>Veterano</option><option>Expert</option></select></td>
                     <td class="pericia-nome">Vontade</td>
                     <td class="attr-tag">Aura</td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0" class="total-cell"></td>
+                    <td><input type="number" value="0" aria-label="Benefícios de Vontade"></td>
+                    <td><input type="number" value="0" aria-label="Outros de Vontade"></td>
+                    <td><input type="number" value="0" class="total-cell" aria-label="Total de Vontade"></td>
                   </tr>
                 </tbody>
               </table>
@@ -679,36 +679,36 @@
                 </thead>
                 <tbody>
                   <tr>
-                    <td><input type="text" placeholder="Ex: Espada"></td>
-                    <td><input type="text" placeholder="Corte"></td>
-                    <td><input type="text" placeholder="Luta"></td>
-                    <td><input type="text" placeholder="Curto"></td>
-                    <td><input type="text" placeholder="1d8"></td>
-                    <td><input type="text" placeholder="19/x2"></td>
+                    <td><input type="text" placeholder="Ex: Espada" aria-label="Arma 1"></td>
+                    <td><input type="text" placeholder="Corte" aria-label="Tipo 1"></td>
+                    <td><input type="text" placeholder="Luta" aria-label="Teste 1"></td>
+                    <td><input type="text" placeholder="Curto" aria-label="Alcance 1"></td>
+                    <td><input type="text" placeholder="1d8" aria-label="Dano 1"></td>
+                    <td><input type="text" placeholder="19/x2" aria-label="Crítico 1"></td>
                   </tr>
                   <tr>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
+                    <td><input type="text" aria-label="Arma 2"></td>
+                    <td><input type="text" aria-label="Tipo 2"></td>
+                    <td><input type="text" aria-label="Teste 2"></td>
+                    <td><input type="text" aria-label="Alcance 2"></td>
+                    <td><input type="text" aria-label="Dano 2"></td>
+                    <td><input type="text" aria-label="Crítico 2"></td>
                   </tr>
                   <tr>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
+                    <td><input type="text" aria-label="Arma 3"></td>
+                    <td><input type="text" aria-label="Tipo 3"></td>
+                    <td><input type="text" aria-label="Teste 3"></td>
+                    <td><input type="text" aria-label="Alcance 3"></td>
+                    <td><input type="text" aria-label="Dano 3"></td>
+                    <td><input type="text" aria-label="Crítico 3"></td>
                   </tr>
                   <tr>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
+                    <td><input type="text" aria-label="Arma 4"></td>
+                    <td><input type="text" aria-label="Tipo 4"></td>
+                    <td><input type="text" aria-label="Teste 4"></td>
+                    <td><input type="text" aria-label="Alcance 4"></td>
+                    <td><input type="text" aria-label="Dano 4"></td>
+                    <td><input type="text" aria-label="Crítico 4"></td>
                   </tr>
                 </tbody>
               </table>
@@ -729,8 +729,8 @@
             <div class="card-header azul">Equipamentos</div>
             <div class="barra-carga">
               <label><input type="checkbox" id="somar-intelecto"> Somar intelecto?</label>
-              <div><span>Atual:</span> <input type="number" id="espacos-atual" value="0" class="mini-input"></div>
-              <div><span>ESPAÇOS:</span> <input type="number" id="espacos-max" value="5" class="mini-input"></div>
+              <div><label for="espacos-atual">Atual:</label> <input type="number" id="espacos-atual" value="0" class="mini-input"></div>
+              <div><label for="espacos-max">ESPAÇOS:</label> <input type="number" id="espacos-max" value="5" class="mini-input"></div>
             </div>
 
             <div class="tabela-scroll">
@@ -746,11 +746,11 @@
                 </thead>
                 <tbody>
                   <tr>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
+                    <td><input type="number" value="0" aria-label="Categoria 0"></td>
+                    <td><input type="number" value="0" aria-label="Categoria I"></td>
+                    <td><input type="number" value="0" aria-label="Categoria II"></td>
+                    <td><input type="number" value="0" aria-label="Categoria III"></td>
+                    <td><input type="number" value="0" aria-label="Categoria IV"></td>
                   </tr>
                 </tbody>
               </table>
@@ -768,34 +768,34 @@
                 </thead>
                 <tbody>
                   <tr>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
+                    <td><input type="text" aria-label="Item 1"></td>
+                    <td><input type="text" aria-label="Descrição do item 1"></td>
+                    <td><input type="number" value="0" aria-label="Categoria do item 1"></td>
+                    <td><input type="number" value="0" aria-label="Espaço do item 1"></td>
                   </tr>
                   <tr>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
+                    <td><input type="text" aria-label="Item 2"></td>
+                    <td><input type="text" aria-label="Descrição do item 2"></td>
+                    <td><input type="number" value="0" aria-label="Categoria do item 2"></td>
+                    <td><input type="number" value="0" aria-label="Espaço do item 2"></td>
                   </tr>
                   <tr>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
+                    <td><input type="text" aria-label="Item 3"></td>
+                    <td><input type="text" aria-label="Descrição do item 3"></td>
+                    <td><input type="number" value="0" aria-label="Categoria do item 3"></td>
+                    <td><input type="number" value="0" aria-label="Espaço do item 3"></td>
                   </tr>
                   <tr>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
+                    <td><input type="text" aria-label="Item 4"></td>
+                    <td><input type="text" aria-label="Descrição do item 4"></td>
+                    <td><input type="number" value="0" aria-label="Categoria do item 4"></td>
+                    <td><input type="number" value="0" aria-label="Espaço do item 4"></td>
                   </tr>
                   <tr>
-                    <td><input type="text"></td>
-                    <td><input type="text"></td>
-                    <td><input type="number" value="0"></td>
-                    <td><input type="number" value="0"></td>
+                    <td><input type="text" aria-label="Item 5"></td>
+                    <td><input type="text" aria-label="Descrição do item 5"></td>
+                    <td><input type="number" value="0" aria-label="Categoria do item 5"></td>
+                    <td><input type="number" value="0" aria-label="Espaço do item 5"></td>
                   </tr>
                 </tbody>
               </table>
@@ -806,7 +806,7 @@
           <div class="coluna-hab">
             <div class="card">
               <div class="card-header roxo">Proficiências</div>
-              <textarea id="proficiencias-txt" rows="6" placeholder="Armas simples, proteções leves..."></textarea>
+              <textarea id="proficiencias-txt" rows="6" placeholder="Armas simples, proteções leves..." aria-label="Proficiências"></textarea>
             </div>
           </div>
         </div>
@@ -820,22 +820,22 @@
 
         <div class="grid-historico">
           <div class="card">
-            <div class="campo-hist"><label>Nome do agente</label><input type="text" id="hist-nome"></div>
-            <div class="campo-hist"><label>Idade</label><input type="text" id="hist-idade"></div>
-            <div class="campo-hist"><label>Gênero</label><input type="text" id="hist-genero"></div>
-            <div class="campo-hist"><label>Altura</label><input type="text" id="hist-altura"></div>
-            <div class="campo-hist"><label>Peso</label><input type="text" id="hist-peso"></div>
-            <div class="campo-hist"><label>Local de Nascimento</label><input type="text" id="hist-nascimento"></div>
-            <div class="campo-hist"><label>Descrição de aparência</label><textarea id="hist-aparencia" rows="4"></textarea></div>
+            <div class="campo-hist"><label for="hist-nome">Nome do agente</label><input type="text" id="hist-nome"></div>
+            <div class="campo-hist"><label for="hist-idade">Idade</label><input type="text" id="hist-idade"></div>
+            <div class="campo-hist"><label for="hist-genero">Gênero</label><input type="text" id="hist-genero"></div>
+            <div class="campo-hist"><label for="hist-altura">Altura</label><input type="text" id="hist-altura"></div>
+            <div class="campo-hist"><label for="hist-peso">Peso</label><input type="text" id="hist-peso"></div>
+            <div class="campo-hist"><label for="hist-nascimento">Local de Nascimento</label><input type="text" id="hist-nascimento"></div>
+            <div class="campo-hist"><label for="hist-aparencia">Descrição de aparência</label><textarea id="hist-aparencia" rows="4"></textarea></div>
           </div>
 
           <div class="card">
-            <div class="campo-hist"><label>Personalidade</label><textarea id="hist-personalidade" rows="2"></textarea></div>
-            <div class="campo-hist"><label>Objetivo Pessoal</label><textarea id="hist-objetivo" rows="2"></textarea></div>
-            <div class="campo-hist"><label>Vícios e Manias</label><textarea id="hist-vicios" rows="2"></textarea></div>
-            <div class="campo-hist"><label>Medos</label><textarea id="hist-medos" rows="2"></textarea></div>
-            <div class="campo-hist"><label>Gostos e Hobbies</label><textarea id="hist-hobbies" rows="2"></textarea></div>
-            <div class="campo-hist"><label>Comida Favorita</label><input type="text" id="hist-comida"></div>
+            <div class="campo-hist"><label for="hist-personalidade">Personalidade</label><textarea id="hist-personalidade" rows="2"></textarea></div>
+            <div class="campo-hist"><label for="hist-objetivo">Objetivo Pessoal</label><textarea id="hist-objetivo" rows="2"></textarea></div>
+            <div class="campo-hist"><label for="hist-vicios">Vícios e Manias</label><textarea id="hist-vicios" rows="2"></textarea></div>
+            <div class="campo-hist"><label for="hist-medos">Medos</label><textarea id="hist-medos" rows="2"></textarea></div>
+            <div class="campo-hist"><label for="hist-hobbies">Gostos e Hobbies</label><textarea id="hist-hobbies" rows="2"></textarea></div>
+            <div class="campo-hist"><label for="hist-comida">Comida Favorita</label><input type="text" id="hist-comida"></div>
           </div>
         </div>
 
@@ -851,10 +851,10 @@
                   </tr>
                 </thead>
                 <tbody>
-                  <tr><td><input type="text"></td><td><input type="text"></td></tr>
-                  <tr><td><input type="text"></td><td><input type="text"></td></tr>
-                  <tr><td><input type="text"></td><td><input type="text"></td></tr>
-                  <tr><td><input type="text"></td><td><input type="text"></td></tr>
+                  <tr><td><input type="text" aria-label="Personagem ou NPC 1"></td><td><input type="text" aria-label="Estado do relacionamento 1"></td></tr>
+                  <tr><td><input type="text" aria-label="Personagem ou NPC 2"></td><td><input type="text" aria-label="Estado do relacionamento 2"></td></tr>
+                  <tr><td><input type="text" aria-label="Personagem ou NPC 3"></td><td><input type="text" aria-label="Estado do relacionamento 3"></td></tr>
+                  <tr><td><input type="text" aria-label="Personagem ou NPC 4"></td><td><input type="text" aria-label="Estado do relacionamento 4"></td></tr>
                 </tbody>
               </table>
             </div>
@@ -862,7 +862,7 @@
 
           <div class="card">
             <div class="card-header azul">História</div>
-            <textarea id="hist-historia" rows="8" placeholder="Escreva a história pregressa do agente..."></textarea>
+            <textarea id="hist-historia" rows="8" placeholder="Escreva a história pregressa do agente..." aria-label="História pregressa do agente"></textarea>
           </div>
         </div>
       </section>
@@ -887,16 +887,16 @@
                   </tr>
                 </thead>
                 <tbody>
-                  <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
-                  <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
-                  <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
-                  <tr><td><input type="text"></td><td><input type="number" value="0"></td><td><input type="number" value="0"></td><td><input type="date"></td></tr>
+                  <tr><td><input type="text" aria-label="Missão 1"></td><td><input type="number" value="0" aria-label="XP da missão 1"></td><td><input type="number" value="0" aria-label="Moeda da missão 1"></td><td><input type="date" aria-label="Data da missão 1"></td></tr>
+                  <tr><td><input type="text" aria-label="Missão 2"></td><td><input type="number" value="0" aria-label="XP da missão 2"></td><td><input type="number" value="0" aria-label="Moeda da missão 2"></td><td><input type="date" aria-label="Data da missão 2"></td></tr>
+                  <tr><td><input type="text" aria-label="Missão 3"></td><td><input type="number" value="0" aria-label="XP da missão 3"></td><td><input type="number" value="0" aria-label="Moeda da missão 3"></td><td><input type="date" aria-label="Data da missão 3"></td></tr>
+                  <tr><td><input type="text" aria-label="Missão 4"></td><td><input type="number" value="0" aria-label="XP da missão 4"></td><td><input type="number" value="0" aria-label="Moeda da missão 4"></td><td><input type="date" aria-label="Data da missão 4"></td></tr>
                 </tbody>
               </table>
             </div>
             <div class="totais-guilda">
-              <div><label>XP totais:</label><input type="number" id="guilda-xp-total" value="0"></div>
-              <div><label>Moedas totais:</label><input type="number" id="guilda-moedas-total" value="0"></div>
+              <div><label for="guilda-xp-total">XP totais:</label><input type="number" id="guilda-xp-total" value="0"></div>
+              <div><label for="guilda-moedas-total">Moedas totais:</label><input type="number" id="guilda-moedas-total" value="0"></div>
             </div>
           </div>
         </div>
@@ -972,7 +972,6 @@
         type="button"
         id="lgpd-accept-btn"
         class="btn-arkan btn-azul"
-        onclick="window.__aceitarLgpdArkan && window.__aceitarLgpdArkan()"
       >
         Entendi e Aceito
       </button>

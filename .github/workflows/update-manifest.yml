@@ -1,78 +1,71 @@
-name: Atualizar release-manifest.json
+name: Update Release Manifest
 
 on:
   push:
     branches:
       - main
-    paths:
-      - "index.html"
-      - "style.css"
-      - "script.js"
-      - ".github/workflows/update-manifest.yml"
+    paths-ignore:
+      - "release-manifest.json"
 
 permissions:
   contents: write
 
 jobs:
-  generate-manifest:
+  update-manifest:
     runs-on: ubuntu-latest
     steps:
-      - name: Baixar código do repositório
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 2
 
-      - name: Gerar release-manifest.json automaticamente
+      - name: Generate release-manifest.json from changes
         run: |
           node -e '
-          const fs = require("fs");
           const { execSync } = require("child_process");
+          const fs = require("fs");
 
-          const shortSha = execSync("git rev-parse --short HEAD").toString().trim();
-          const commitMsg = execSync("git log -1 --pretty=%s").toString().trim();
-          const now = new Date();
-          const pad = (n) => String(n).padStart(2, "0");
-          const stamp = `${now.getUTCFullYear()}.${pad(now.getUTCMonth() + 1)}.${pad(now.getUTCDate())}.${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}`;
-          const version = `${stamp}-${shortSha}`;
-
-          let changedFiles = ["index.html", "style.css", "script.js"];
+          let diffText = "";
           try {
-            const diffOutput = execSync("git diff --name-only HEAD~1 HEAD", { stdio: ["pipe", "pipe", "ignore"] })
-              .toString()
-              .trim()
-              .split("\n")
-              .map((s) => s.trim())
-              .filter((f) => ["index.html", "style.css", "script.js"].includes(f));
-            if (diffOutput.length > 0) {
-              changedFiles = diffOutput;
-            }
-          } catch (_) {
-            // Mantém lista padrão no primeiro commit
+            diffText = execSync("git diff HEAD~1 HEAD -- . \":!release-manifest.json\"", { encoding: "utf8" });
+          } catch {
+            diffText = execSync("git show --format= -- . \":!release-manifest.json\"", { encoding: "utf8" });
           }
 
+          const addedLines = [];
+          for (const line of diffText.split("\n")) {
+            if (line.startsWith("+") && !line.startsWith("+++")) {
+              const clean = line.slice(1).trim();
+              if (clean) addedLines.push(clean);
+            }
+          }
+
+          const changedFiles = execSync("git diff --name-only HEAD~1 HEAD -- . \":!release-manifest.json\"", { encoding: "utf8" })
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean);
+
+          const commitMsg = execSync("git log -1 --pretty=%s", { encoding: "utf8" }).trim();
+          const shaShort = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+          const updatedAt = new Date().toISOString();
+
           const manifest = {
-            version,
-            publishedAt: now.toISOString(),
-            filesUpdated: changedFiles,
-            addedFunctions: [
-              `Atualização automática via GitHub (${commitMsg || "novo push"})`
-            ],
-            improvements: [
-              `Build #${shortSha} publicado automaticamente na branch main`
-            ]
+            version: shaShort,
+            updatedAt,
+            title: commitMsg || `Atualização ${shaShort}`,
+            files: changedFiles,
+            added: addedLines.slice(0, 60)
           };
 
           fs.writeFileSync("release-manifest.json", JSON.stringify(manifest, null, 2) + "\n", "utf8");
           '
 
-      - name: Enviar release-manifest.json de volta para o GitHub
+      - name: Commit release-manifest.json
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add release-manifest.json
-          if git diff --staged --quiet; then
-            echo "Sem alterações no manifesto."
-          else
-            git commit -m "chore: atualiza release-manifest.json automaticamente [skip ci]"
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: update release-manifest.json [skip ci]"
             git push
           fi

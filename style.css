@@ -1044,10 +1044,16 @@ html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell
 }
 
 .barra-carga label {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   width: auto;
+}
+
+.barra-carga > div {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .barra-carga input[type="checkbox"] {
