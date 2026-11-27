@@ -252,6 +252,71 @@ body {
   transform: rotateX(6deg) rotateY(0deg) skewX(-2deg) scale(1.025);
 }
 
+/* Escrita letra por letra em 3D no título da tela de login */
+.entrada-titulo-3d.titulo-3d-digitando {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: baseline;
+}
+
+.entrada-titulo-3d .letra-3d {
+  display: inline-block;
+  opacity: 0;
+  transform: translate3d(0, 12px, -36px) rotateX(-38deg);
+  transform-style: preserve-3d;
+  animation: escreverLetra3D 0.34s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: var(--delay-letra, 0ms);
+  will-change: transform, opacity;
+}
+
+.entrada-titulo-3d .espaco-3d {
+  display: inline-block;
+  width: 0.42em;
+}
+
+.entrada-titulo-3d .cursor-escrita-3d {
+  display: inline-block;
+  width: 0.1em;
+  height: 0.85em;
+  margin-left: 0.14em;
+  vertical-align: -0.06em;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #8ce0f0 0%, #3ca888 100%);
+  box-shadow: 0 0 12px rgba(140, 224, 240, 0.8);
+  animation: piscarCursor3D 0.85s ease-in-out infinite;
+}
+
+.entrada-titulo-3d .cursor-escrita-3d.concluido {
+  opacity: 0;
+  animation: none;
+  transition: opacity 0.35s ease;
+}
+
+@keyframes escreverLetra3D {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 12px, -36px) rotateX(-38deg);
+  }
+  70% {
+    opacity: 1;
+    transform: translate3d(0, -2px, 8px) rotateX(6deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotateX(0deg);
+  }
+}
+
+@keyframes piscarCursor3D {
+  0%, 48% {
+    opacity: 1;
+  }
+  52%, 100% {
+    opacity: 0.15;
+  }
+}
+
 .entrada-box {
   width: 100%;
   max-width: 860px;
