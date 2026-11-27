@@ -1,22 +1,22 @@
 /* ==========================================================================
    Ordem de Arkan - Ficha de Agente (script.js)
-   Módulos organizados por responsabilidade única:
-   1. Configuração e Constantes
-   2. Sanitização, Validação e Segurança de Entrada
-   3. Animação de Escrita 3D na Tela de Login
-   4. Cálculo de Perícias e Tema Dinâmico de Nen
-   5. Privacidade (LGPD) e Navegação por Seção
-   6. Coleta, Normalização e Persistência Local/Nuvem (Própria ou Alvo Admin)
-   7. Autenticação Firebase, Permissão Admin Exclusiva e Mensagens
-   8. Comandos do Administrador com "/" (1 comando = 1 função específica)
-   9. Interface, Banners, Modo Somente Leitura e Inicialização
+   Segurança front-end (XSS, Prototype Pollution, validação de faixa/tipo,
+   anti-spam de escrita, higiene de sessão, isTrusted guard e console guard)
+   + Firebase Authentication & Cloud Firestore + Sessão Offline/Local temporária
+   + Modo Administrador por UID (exclusivo): Prompt de Comando, Funções
+     Dinâmicas do Comando Abaixo, Todos os Comandos Ativos, Mensagem até 24h
+     (Normal/Urgente), Somente Leitura, UIDs Recentes, Ajuste Rápido,
+     Modelos Base, Diff, Backup JSON e Log da Sessão
+   + Exclusão de ficha e exclusão de conta
+   + Sincronização precisa das seções no topo conforme a rolagem
+   + Cores dinâmicas conforme a Categoria Principal de Afinidade de Nen
+   + Interatividade do painel de detalhes LGPD no rodapé do criador
+   + Cálculo automático da tabela de Perícias (#tabela-pericias)
+   Criador: Lucas Ramalho Gavasso Trizote
    ========================================================================== */
 
 "use strict";
 
-/* --------------------------------------------------------------------------
-   1. Configuração e Constantes
-   -------------------------------------------------------------------------- */
 const FIREBASE_CONFIG = Object.freeze({
   apiKey: "AIzaSyDnzpJLFYXxesm6ajmyfZW3CnxeEe9zol4",
   authDomain: "rpg-9ffa7.firebaseapp.com",
@@ -28,34 +28,105 @@ const FIREBASE_CONFIG = Object.freeze({
 
 const STORAGE_KEYS = Object.freeze({
   LOCAL_SHEET: "ordem_de_arkan_agente_v1",
-  COOKIE_CONSENT: "ordem_de_arkan_lgpd_v1"
+  COOKIE_CONSENT: "ordem_de_arkan_lgpd_v1",
+  ADMIN_TARGET_UID: "ordem_de_arkan_admin_target_uid_v1",
+  ADMIN_RECENT_UIDS: "ordem_de_arkan_admin_recent_uids_v1"
+});
+
+const ADMIN_UID = "TcudbnuOMcTySJWhz0JHaNDuNU22";
+const UID_REGEX = /^[a-zA-Z0-9_-]{10,128}$/;
+const ADMIN_NOTICE_FIELD_KEY = "id:admin_recado_payload";
+const MAX_NOTICE_HOURS = 24;
+const MAX_NOTICE_MINUTES = MAX_NOTICE_HOURS * 60;
+const MAX_RECENT_UIDS = 6;
+const MAX_ADMIN_LOGS = 25;
+
+const ADMIN_COMMAND_CATALOG = Object.freeze([
+  { cmd: "/uid", syntax: "/uid <UID>", desc: "Carregar ou trocar UID alvo" },
+  { cmd: "/minha", syntax: "/minha", desc: "Voltar para a própria ficha" },
+  { cmd: "/recado", syntax: "/recado <min> <texto>", desc: "Enviar recado normal (até 24h)" },
+  { cmd: "/urgente", syntax: "/urgente <min> <texto>", desc: "Enviar recado urgente (até 24h)" },
+  { cmd: "/remover", syntax: "/remover", desc: "Remover recado ativo do UID" },
+  { cmd: "/ler", syntax: "/ler [on|off]", desc: "Alternar modo somente leitura" },
+  { cmd: "/stats", syntax: "/stats", desc: "Ajustar Nível, Rank e Espaços" },
+  { cmd: "/modelo", syntax: "/modelo [iniciante|veterano|elite]", desc: "Clonar modelo base na ficha" },
+  { cmd: "/diff", syntax: "/diff", desc: "Ver alterações pendentes" },
+  { cmd: "/json", syntax: "/json", desc: "Exportar ou importar JSON" },
+  { cmd: "/log", syntax: "/log", desc: "Ver log da sessão do admin" },
+  { cmd: "/ajuda", syntax: "/ajuda", desc: "Listar todos os comandos" }
+]);
+
+const NOTICE_DURATION_PRESETS = Object.freeze([
+  { minutes: 15, label: "15 minutos" },
+  { minutes: 30, label: "30 minutos" },
+  { minutes: 60, label: "1 hora (60 min)" },
+  { minutes: 360, label: "6 horas" },
+  { minutes: 720, label: "12 horas" },
+  { minutes: 1440, label: "24 horas (máx.)" }
+]);
+
+const SHEET_TEMPLATES = Object.freeze({
+  iniciante: Object.freeze({
+    label: "Agente Iniciante (Nv 1 / Rank E)",
+    fields: Object.freeze({
+      "id:nv-val": "1",
+      "id:rank-val": "E",
+      "id:espacos-max": "5",
+      "id:attr-agi": "1",
+      "id:attr-for": "1",
+      "id:attr-ca": "1",
+      "id:attr-int": "1",
+      "id:attr-vig": "1",
+      "id:def-total": "11",
+      "id:def-esquiva": "11",
+      "id:def-deslocamento": "9"
+    })
+  }),
+  veterano: Object.freeze({
+    label: "Agente Veterano (Nv 10 / Rank C)",
+    fields: Object.freeze({
+      "id:nv-val": "10",
+      "id:rank-val": "C",
+      "id:espacos-max": "10",
+      "id:attr-agi": "3",
+      "id:attr-for": "2",
+      "id:attr-ca": "3",
+      "id:attr-int": "2",
+      "id:attr-vig": "3",
+      "id:def-total": "14",
+      "id:def-esquiva": "14",
+      "id:def-deslocamento": "10"
+    })
+  }),
+  elite: Object.freeze({
+    label: "Agente Elite / NPC Chefe (Nv 25 / Rank A)",
+    fields: Object.freeze({
+      "id:nv-val": "25",
+      "id:rank-val": "A",
+      "id:espacos-max": "18",
+      "id:attr-agi": "5",
+      "id:attr-for": "4",
+      "id:attr-ca": "6",
+      "id:attr-int": "4",
+      "id:attr-vig": "5",
+      "id:def-total": "18",
+      "id:def-esquiva": "18",
+      "id:def-deslocamento": "12"
+    })
+  })
 });
 
 const FORBIDDEN_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 const FIRESTORE_COLLECTION = "fichas_ordem_arkan";
-const FIRESTORE_MESSAGES_COLLECTION = "mensagens_ordem_arkan";
 const FIREBASE_SDK_VERSION = "10.14.1";
 const MIN_CLOUD_SAVE_INTERVAL_MS = 1200;
-const AUTO_SAVE_DEBOUNCE_MS = 750;
-
-// UID exclusivo autorizado a acessar a função de administrador
-const ADMIN_EXCLUSIVE_UID = "TcudbnuOMcTySJWhz0JHaNDuNU22";
-
-const LOGIN_TYPEWRITER_CONFIG = Object.freeze({
-  defaultTitle: "Ordem de Arkan",
-  initialDelayMs: 140,
-  stepDelayMs: 95,
-  letterAnimMs: 340,
-  cursorFinishBufferMs: 420
-});
 
 const TRACKED_SECTIONS = Object.freeze([
   { id: "dados-agente", label: "Dados do Agente" },
   { id: "equipamentos-habilidades", label: "Equipamentos e Habilidades" },
   { id: "historico", label: "Histórico" },
   { id: "guilda", label: "Guilda" },
-  { id: "privacidade-lgpd", label: "Privacidade (LGPD)" },
-  { id: "admin-painel", label: "Admin" }
+  { id: "privacidade-lgpd", label: "Privacidade (LGPD)" }
 ]);
 
 const NEN_CATEGORIES_MAP = Object.freeze({
@@ -65,15 +136,6 @@ const NEN_CATEGORIES_MAP = Object.freeze({
   materializacao: "materializacao",
   manipulacao: "manipulacao",
   especializacao: "especializacao"
-});
-
-const NEN_SELECT_LABELS = Object.freeze({
-  reforco: "Reforço",
-  emissao: "Emissão",
-  transformacao: "Transformação",
-  materializacao: "Materialização",
-  manipulacao: "Manipulação",
-  especializacao: "Especialização"
 });
 
 const SKILL_GRADE_BONUS = Object.freeze({
@@ -114,10 +176,6 @@ const NUMERIC_BOUNDS = Object.freeze({
 
 const state = {
   user: null,
-  isAdmin: false,
-  inspectedTargetUid: "",
-  adminReadOnly: false,
-  knownPlayerUids: [],
   offlineMode: false,
   firebaseReady: false,
   auth: null,
@@ -130,15 +188,33 @@ const state = {
   nenCategory: "",
   scrollRafId: null,
   saveTimer: null,
-  loginTypewriterTimer: null,
   isSaving: false,
   isDeleting: false,
   lastSavedSnapshot: "",
-  lastCloudWriteAt: 0
+  baselineFields: createSafeRecord(),
+  lastCloudWriteAt: 0,
+  adminTargetUid: "",
+  adminRecentUids: [],
+  adminReadOnly: false,
+  adminLogs: [],
+  adminActiveCommand: "",
+  adminAllCommandsActive: false,
+  adminDraftUid: "",
+  adminDraftNoticeText: "",
+  adminDraftNoticeMinutes: MAX_NOTICE_MINUTES,
+  adminDraftNoticePriority: "normal",
+  adminDraftNv: "1",
+  adminDraftRank: "E",
+  adminDraftSlots: "5",
+  adminDraftTemplate: "iniciante",
+  adminDraftJson: "",
+  adminDiffText: "",
+  activeNotice: null,
+  noticeExpiryTimer: null
 };
 
 /* --------------------------------------------------------------------------
-   2. Sanitização, Validação e Segurança de Entrada
+   Defesa contra Prototype Pollution, XSS, Faixa Inválida e Console Guard
    -------------------------------------------------------------------------- */
 function isForbiddenKey(key) {
   return typeof key !== "string" || FORBIDDEN_KEYS.includes(key.toLowerCase());
@@ -194,9 +270,15 @@ function normalizeRankValue(rawValue) {
 
 function normalizeControlValue(ctrl, rawValue) {
   if (!ctrl) return "";
-  if (ctrl.id === "rank-val") return normalizeRankValue(rawValue);
-  if (ctrl.type === "number") return normalizeNumericValue(ctrl.id || "", rawValue);
-  if (ctrl.tagName === "TEXTAREA") return sanitizeText(String(rawValue ?? ""), 5000);
+  if (ctrl.id === "rank-val") {
+    return normalizeRankValue(rawValue);
+  }
+  if (ctrl.type === "number") {
+    return normalizeNumericValue(ctrl.id || "", rawValue);
+  }
+  if (ctrl.tagName === "TEXTAREA") {
+    return sanitizeText(String(rawValue ?? ""), 5000);
+  }
   return sanitizeSingleLine(String(rawValue ?? ""), 250);
 }
 
@@ -215,6 +297,15 @@ function hardenExternalLinks() {
   });
 }
 
+function clearAuthSensitiveInputs() {
+  const emailEl = document.getElementById("auth-email");
+  const passEl = document.getElementById("auth-password");
+  if (emailEl) emailEl.value = "";
+  if (passEl) passEl.value = "";
+  state.showPassword = false;
+  updatePasswordVisibilityUI();
+}
+
 function initConsoleSecurityGuard() {
   try {
     const warnStyle = "color: #ffd966; font-size: 13px; font-weight: bold;";
@@ -230,78 +321,1370 @@ function initConsoleSecurityGuard() {
 }
 
 /* --------------------------------------------------------------------------
-   3. Animação de Escrita 3D na Tela de Login
+   Mensagens Temporárias do Admin por UID (Normal/Urgente até 24h)
    -------------------------------------------------------------------------- */
-function getLoginSiteTitleText(titleEl) {
-  const fromAttr = sanitizeSingleLine(titleEl?.getAttribute("aria-label") || "", 60);
-  if (fromAttr) return fromAttr;
-  const fromText = sanitizeSingleLine(titleEl?.textContent || "", 60);
-  return fromText || LOGIN_TYPEWRITER_CONFIG.defaultTitle;
+function normalizeNoticeMinutes(rawMinutes) {
+  const num = Number(rawMinutes);
+  if (!Number.isFinite(num) || num <= 0) return MAX_NOTICE_MINUTES;
+  return Math.min(MAX_NOTICE_MINUTES, Math.max(1, Math.trunc(num)));
 }
 
-function createAnimatedLetterNode(char, index) {
-  const span = document.createElement("span");
-  const delayMs = LOGIN_TYPEWRITER_CONFIG.initialDelayMs + index * LOGIN_TYPEWRITER_CONFIG.stepDelayMs;
+function normalizeNoticePriority(rawPriority) {
+  return rawPriority === "urgent" ? "urgent" : "normal";
+}
 
-  if (char === " ") {
-    span.className = "espaco-3d";
-    span.textContent = "\u00A0";
-  } else {
-    span.className = "letra-3d";
-    span.textContent = char;
-    span.style.setProperty("--delay-letra", `${delayMs}ms`);
+function formatDurationLabel(minutes) {
+  const safeMin = normalizeNoticeMinutes(minutes);
+  if (safeMin < 60) {
+    return `${safeMin} min`;
+  }
+  const wholeHours = Math.floor(safeMin / 60);
+  const remMinutes = safeMin % 60;
+  return remMinutes === 0 ? `${wholeHours}h` : `${wholeHours}h ${remMinutes}min`;
+}
+
+function formatRemainingTimeLabel(expiresAtMs) {
+  const diffMs = Number(expiresAtMs) - Date.now();
+  if (!Number.isFinite(diffMs) || diffMs <= 0) return "expirado";
+  const totalMin = Math.max(1, Math.ceil(diffMs / 60000));
+  return `restam ~${formatDurationLabel(totalMin)}`;
+}
+
+function buildEncodedNoticePayload(messageText, minutesValue, priorityValue = "normal") {
+  const cleanText = sanitizeText(String(messageText ?? ""), 600).trim();
+  if (!cleanText) return "";
+
+  const minutes = normalizeNoticeMinutes(minutesValue);
+  const priority = normalizeNoticePriority(priorityValue);
+  const nowMs = Date.now();
+  const maxAllowedExpiryMs = nowMs + MAX_NOTICE_MINUTES * 60 * 1000;
+  const requestedExpiryMs = nowMs + minutes * 60 * 1000;
+  const expiresAtMs = Math.min(maxAllowedExpiryMs, requestedExpiryMs);
+
+  return JSON.stringify({
+    msg: cleanText,
+    minutes,
+    hours: Number((minutes / 60).toFixed(2)),
+    priority,
+    sentAt: nowMs,
+    expiresAt: expiresAtMs
+  });
+}
+
+function parseActiveNoticeFromFields(fieldsObj) {
+  if (!fieldsObj || typeof fieldsObj !== "object") return null;
+  if (!Object.prototype.hasOwnProperty.call(fieldsObj, ADMIN_NOTICE_FIELD_KEY)) return null;
+
+  const raw = fieldsObj[ADMIN_NOTICE_FIELD_KEY];
+  if (typeof raw !== "string" || !raw.trim() || raw.length > 2000) return null;
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const cleanMsg = sanitizeText(String(parsed.msg ?? ""), 600).trim();
+    const sentAt = Number(parsed.sentAt);
+    const expiresAt = Number(parsed.expiresAt);
+    const rawMin =
+      parsed.minutes !== undefined && parsed.minutes !== null
+        ? parsed.minutes
+        : Number(parsed.hours) * 60;
+    const minutes = normalizeNoticeMinutes(rawMin);
+    const priority = normalizeNoticePriority(parsed.priority);
+
+    if (!cleanMsg || !Number.isFinite(expiresAt)) return null;
+
+    const nowMs = Date.now();
+    const hardCapMs = (Number.isFinite(sentAt) ? sentAt : nowMs) + MAX_NOTICE_MINUTES * 60 * 1000;
+    const effectiveExpiryMs = Math.min(expiresAt, hardCapMs);
+
+    if (nowMs >= effectiveExpiryMs) {
+      return null;
+    }
+
+    return {
+      msg: cleanMsg,
+      minutes,
+      priority,
+      expiresAt: effectiveExpiryMs
+    };
+  } catch {
+    return null;
+  }
+}
+
+function scheduleNoticeExpiryCheck() {
+  if (state.noticeExpiryTimer) {
+    clearTimeout(state.noticeExpiryTimer);
+    state.noticeExpiryTimer = null;
   }
 
-  span.setAttribute("aria-hidden", "true");
-  return span;
-}
+  if (!state.activeNotice || !Number.isFinite(state.activeNotice.expiresAt)) return;
 
-function playLoginTitle3DWriting(forceReplay = false) {
-  const entradaScreen = document.getElementById("entrada-screen");
-  const titleEl = document.getElementById("entrada-titulo");
-  if (!entradaScreen || entradaScreen.hidden || !titleEl) return;
-
-  if (!forceReplay && titleEl.dataset.animacaoConcluida === "1") {
+  const remainingMs = state.activeNotice.expiresAt - Date.now();
+  if (remainingMs <= 0) {
+    state.activeNotice = null;
+    renderPlayerNoticeBanner();
+    renderAdminCommandFunctionsBelow();
     return;
   }
 
-  if (state.loginTypewriterTimer !== null) {
-    clearTimeout(state.loginTypewriterTimer);
-    state.loginTypewriterTimer = null;
+  state.noticeExpiryTimer = setTimeout(() => {
+    state.noticeExpiryTimer = null;
+    if (state.activeNotice && Date.now() >= state.activeNotice.expiresAt) {
+      state.activeNotice = null;
+      renderPlayerNoticeBanner();
+      renderAdminCommandFunctionsBelow();
+    }
+  }, Math.min(remainingMs + 250, 2147483647));
+}
+
+function renderPlayerNoticeBanner() {
+  const banner = document.getElementById("player-admin-notice-banner");
+  const hasSession = Boolean(state.user) || Boolean(state.offlineMode);
+
+  if (!hasSession || state.offlineMode || !state.activeNotice || Date.now() >= (state.activeNotice.expiresAt || 0)) {
+    if (banner) banner.hidden = true;
+    return;
   }
 
-  const siteName = getLoginSiteTitleText(titleEl);
-  const chars = Array.from(siteName);
-  const fragment = document.createDocumentFragment();
+  ensurePlayerNoticeBannerElement();
+  const activeBanner = document.getElementById("player-admin-notice-banner");
+  if (!activeBanner) return;
 
-  chars.forEach((char, idx) => {
-    fragment.appendChild(createAnimatedLetterNode(char, idx));
+  const isUrgent = state.activeNotice.priority === "urgent";
+  activeBanner.style.border = isUrgent
+    ? "1px solid rgba(255, 99, 99, 0.85)"
+    : "1px solid rgba(255, 217, 102, 0.55)";
+  activeBanner.style.background = isUrgent
+    ? "rgba(62, 22, 28, 0.96)"
+    : "rgba(34, 42, 54, 0.96)";
+
+  const expDate = new Date(state.activeNotice.expiresAt);
+  const expFormatted = expDate.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
   });
 
-  const cursor = document.createElement("span");
-  cursor.className = "cursor-escrita-3d";
-  cursor.setAttribute("aria-hidden", "true");
-  fragment.appendChild(cursor);
+  activeBanner.innerHTML = "";
 
-  titleEl.setAttribute("aria-label", siteName);
-  titleEl.classList.add("titulo-3d-digitando");
-  titleEl.dataset.animacaoConcluida = "1";
-  titleEl.replaceChildren(fragment);
+  const header = document.createElement("div");
+  header.style.cssText = "display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; margin-bottom: 6px;";
 
-  const totalMs =
-    LOGIN_TYPEWRITER_CONFIG.initialDelayMs +
-    chars.length * LOGIN_TYPEWRITER_CONFIG.stepDelayMs +
-    LOGIN_TYPEWRITER_CONFIG.letterAnimMs +
-    LOGIN_TYPEWRITER_CONFIG.cursorFinishBufferMs;
+  const title = document.createElement("strong");
+  title.textContent = isUrgent
+    ? "AVISO URGENTE DO ADMINISTRADOR"
+    : "Recado do Administrador";
+  title.style.cssText = isUrgent
+    ? "color: #ff8a80; font-size: 13px; letter-spacing: 0.4px;"
+    : "color: #ffe082; font-size: 13px;";
 
-  state.loginTypewriterTimer = window.setTimeout(() => {
-    state.loginTypewriterTimer = null;
-    cursor.classList.add("concluido");
-  }, totalMs);
+  const meta = document.createElement("span");
+  meta.textContent = `Duração: ${formatDurationLabel(state.activeNotice.minutes)} (${formatRemainingTimeLabel(state.activeNotice.expiresAt)} · expira em ${expFormatted})`;
+  meta.style.cssText = "color: #d6dee6; font-size: 12px;";
+
+  const body = document.createElement("p");
+  body.textContent = state.activeNotice.msg;
+  body.style.cssText = "margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.45;";
+
+  header.appendChild(title);
+  header.appendChild(meta);
+  activeBanner.appendChild(header);
+  activeBanner.appendChild(body);
+  activeBanner.hidden = false;
+}
+
+function ensurePlayerNoticeBannerElement() {
+  if (document.getElementById("player-admin-notice-banner")) return;
+  const appFicha = document.getElementById("app-ficha");
+  const mainEl = document.querySelector("main.container");
+  const anchorParent = mainEl && mainEl.parentNode ? mainEl.parentNode : appFicha;
+  if (!anchorParent) return;
+
+  const box = document.createElement("aside");
+  box.id = "player-admin-notice-banner";
+  box.hidden = true;
+  box.setAttribute("role", "status");
+  box.setAttribute("aria-live", "polite");
+  box.style.cssText = [
+    "margin: 10px auto 12px",
+    "padding: 12px 14px",
+    "max-width: 1120px",
+    "border-radius: 10px",
+    "border: 1px solid rgba(255, 217, 102, 0.55)",
+    "background: rgba(34, 42, 54, 0.96)",
+    "color: #f4f6f8"
+  ].join(";");
+
+  const adminBar = document.getElementById("admin-uid-bar");
+  if (adminBar && adminBar.parentNode === anchorParent) {
+    anchorParent.insertBefore(box, adminBar.nextSibling);
+  } else if (mainEl && mainEl.parentNode === anchorParent) {
+    anchorParent.insertBefore(box, mainEl);
+  } else {
+    anchorParent.appendChild(box);
+  }
 }
 
 /* --------------------------------------------------------------------------
-   4. Cálculo de Perícias e Tema Dinâmico de Nen
+   Helpers Exclusivos da Conta Admin: Prompt, Funções Abaixo do Comando e
+   Área de Todos os Comandos Ativos
+   -------------------------------------------------------------------------- */
+function isCurrentUserAdmin() {
+  return Boolean(state.user && typeof state.user.uid === "string" && state.user.uid === ADMIN_UID);
+}
+
+function isInspectionReadOnlyActive() {
+  return Boolean(isCurrentUserAdmin() && state.adminReadOnly);
+}
+
+function sanitizeTargetUid(rawUid) {
+  const clean = sanitizeSingleLine(String(rawUid ?? ""), 128);
+  return UID_REGEX.test(clean) ? clean : "";
+}
+
+function appendAdminLog(actionText) {
+  if (!isCurrentUserAdmin()) return;
+  const clean = sanitizeSingleLine(actionText, 180);
+  if (!clean) return;
+  const timeStr = new Date().toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+  state.adminLogs = [`[${timeStr}] ${clean}`, ...state.adminLogs].slice(0, MAX_ADMIN_LOGS);
+  if (state.adminActiveCommand === "/log") {
+    renderAdminCommandFunctionsBelow();
+  }
+}
+
+function captureBaselineFields(fieldsObj) {
+  const copy = createSafeRecord();
+  if (!fieldsObj || typeof fieldsObj !== "object") {
+    state.baselineFields = copy;
+    return;
+  }
+  Object.entries(fieldsObj).forEach(([k, v]) => {
+    if (isValidFieldKey(k)) {
+      copy[k] = v;
+    }
+  });
+  state.baselineFields = copy;
+}
+
+function computeSheetDiffList() {
+  const current = collectSheetData().fields;
+  const baseline = state.baselineFields || createSafeRecord();
+  const allKeys = Array.from(new Set([...Object.keys(baseline), ...Object.keys(current)])).sort();
+  const changes = [];
+
+  for (let i = 0; i < allKeys.length; i += 1) {
+    const key = allKeys[i];
+    if (!isValidFieldKey(key) || key === ADMIN_NOTICE_FIELD_KEY) continue;
+    const oldVal = Object.prototype.hasOwnProperty.call(baseline, key) ? baseline[key] : "";
+    const newVal = Object.prototype.hasOwnProperty.call(current, key) ? current[key] : "";
+    if (String(oldVal) !== String(newVal)) {
+      const label = key.startsWith("id:") ? key.slice(3) : key;
+      changes.push(`${label}: "${String(oldVal)}" → "${String(newVal)}"`);
+    }
+  }
+  return changes;
+}
+
+function saveAdminTargetUidToStorage(uid) {
+  try {
+    if (uid) {
+      sessionStorage.setItem(STORAGE_KEYS.ADMIN_TARGET_UID, uid);
+    } else {
+      sessionStorage.removeItem(STORAGE_KEYS.ADMIN_TARGET_UID);
+    }
+  } catch {
+    // Ignora falha de armazenamento
+  }
+}
+
+function loadAdminTargetUidFromStorage() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEYS.ADMIN_TARGET_UID) || "";
+    return sanitizeTargetUid(raw);
+  } catch {
+    return "";
+  }
+}
+
+function recordRecentAdminUid(uid) {
+  const clean = sanitizeTargetUid(uid);
+  if (!clean) return;
+  const next = [clean, ...state.adminRecentUids.filter((item) => item !== clean)].slice(0, MAX_RECENT_UIDS);
+  state.adminRecentUids = next;
+  try {
+    sessionStorage.setItem(STORAGE_KEYS.ADMIN_RECENT_UIDS, JSON.stringify(next));
+  } catch {
+    // Ignora falha de armazenamento
+  }
+  if (state.adminActiveCommand === "/uid" || state.adminActiveCommand === "/minha") {
+    renderAdminCommandFunctionsBelow();
+  }
+}
+
+function loadRecentAdminUidsFromStorage() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEYS.ADMIN_RECENT_UIDS);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(sanitizeTargetUid).filter(Boolean).slice(0, MAX_RECENT_UIDS);
+  } catch {
+    return [];
+  }
+}
+
+function getActiveTargetUid() {
+  if (!state.user || !state.user.uid) return "";
+  if (isCurrentUserAdmin() && state.adminTargetUid) {
+    return state.adminTargetUid;
+  }
+  return state.user.uid;
+}
+
+function applySheetReadOnlyState() {
+  const mainEl = document.querySelector("main.container");
+  if (!mainEl) return;
+
+  const lock = isInspectionReadOnlyActive();
+  const controls = mainEl.querySelectorAll("input, select, textarea");
+  controls.forEach((ctrl) => {
+    if (!ctrl || ctrl.closest("#login-firebase")) return;
+    if (ctrl.tagName === "SELECT" || ctrl.type === "checkbox") {
+      ctrl.disabled = lock;
+    } else {
+      ctrl.readOnly = lock;
+      ctrl.setAttribute("aria-readonly", lock ? "true" : "false");
+    }
+  });
+}
+
+function syncAdminQuickInputsFromSheet() {
+  const sheetNv = document.getElementById("nv-val");
+  const sheetRank = document.getElementById("rank-val");
+  const sheetSlots = document.getElementById("espacos-max");
+
+  if (sheetNv && document.activeElement?.id !== "admin-fn-nv") {
+    state.adminDraftNv = normalizeNumericValue("nv-val", sheetNv.value || "1");
+  }
+  if (sheetRank && document.activeElement?.id !== "admin-fn-rank") {
+    const cleanRank = normalizeRankValue(sheetRank.value || "E");
+    state.adminDraftRank = ALLOWED_RANKS.includes(cleanRank) ? cleanRank : "E";
+  }
+  if (sheetSlots && document.activeElement?.id !== "admin-fn-slots") {
+    state.adminDraftSlots = normalizeNumericValue("espacos-max", sheetSlots.value || "5");
+  }
+}
+
+function resolveCommandNameFromInput(rawInput) {
+  const clean = sanitizeSingleLine(String(rawInput ?? ""), 120).trim();
+  if (!clean) return "";
+  const firstToken = clean.split(/\s+/)[0].toLowerCase();
+  const normalizedToken = firstToken.startsWith("/") ? firstToken : `/${firstToken}`;
+
+  if (normalizedToken === "/ajuste" || normalizedToken === "/nv" || normalizedToken === "/rank") {
+    return "/stats";
+  }
+  if (normalizedToken === "/exportar" || normalizedToken === "/importar") {
+    return "/json";
+  }
+  if (normalizedToken === "/help") {
+    return "/ajuda";
+  }
+
+  const found = ADMIN_COMMAND_CATALOG.find((item) => item.cmd === normalizedToken);
+  return found ? found.cmd : normalizedToken;
+}
+
+function renderActiveCommandsStrip() {
+  const strip = document.getElementById("admin-all-commands-box");
+  const toggleBtn = document.getElementById("admin-toggle-all-cmds-btn");
+  if (!strip || !toggleBtn) return;
+
+  toggleBtn.textContent = state.adminAllCommandsActive
+    ? "Todos os comandos: ATIVOS (ON)"
+    : "Ativar todos os comandos";
+  toggleBtn.style.background = state.adminAllCommandsActive
+    ? "rgba(255, 217, 102, 0.22)"
+    : "transparent";
+  toggleBtn.style.color = state.adminAllCommandsActive ? "#ffd966" : "#e4e4ec";
+  toggleBtn.style.borderColor = state.adminAllCommandsActive
+    ? "#ffd966"
+    : "rgba(255,255,255,0.25)";
+
+  if (!state.adminAllCommandsActive) {
+    strip.hidden = true;
+    strip.innerHTML = "";
+    return;
+  }
+
+  strip.hidden = false;
+  strip.innerHTML = "";
+
+  const header = document.createElement("div");
+  header.textContent = "Comandos ativos (clique para carregar no prompt e exibir as funções abaixo):";
+  header.style.cssText = "font-size: 12px; color: #ffd966; font-weight: 600; margin-bottom: 6px;";
+  strip.appendChild(header);
+
+  const grid = document.createElement("div");
+  grid.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px;";
+
+  ADMIN_COMMAND_CATALOG.forEach((item) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    const isSelected = state.adminActiveCommand === item.cmd;
+    btn.textContent = `${item.cmd} — ${item.desc}`;
+    btn.style.cssText = [
+      "padding: 5px 9px",
+      "border-radius: 7px",
+      "font-size: 11px",
+      "cursor: pointer",
+      isSelected
+        ? "border: 1px solid #ffd966; background: rgba(255,217,102,0.2); color: #ffd966; font-weight: 700;"
+        : "border: 1px solid rgba(255,255,255,0.18); background: rgba(10,14,18,0.8); color: #e4e4ec;"
+    ].join(";");
+
+    btn.addEventListener("click", () => {
+      const promptInput = document.getElementById("admin-prompt-input");
+      if (promptInput) {
+        promptInput.value = `${item.cmd} `;
+        promptInput.focus();
+      }
+      state.adminActiveCommand = item.cmd;
+      renderActiveCommandsStrip();
+      renderAdminCommandFunctionsBelow();
+    });
+
+    grid.appendChild(btn);
+  });
+
+  strip.appendChild(grid);
+}
+
+function renderAdminCommandFunctionsBelow() {
+  const box = document.getElementById("admin-command-functions-panel");
+  if (!box) return;
+
+  const cmd = state.adminActiveCommand;
+  if (!cmd) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+
+  box.hidden = false;
+  box.innerHTML = "";
+
+  const titleRow = document.createElement("div");
+  titleRow.style.cssText = "display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;";
+
+  const title = document.createElement("strong");
+  const spec = ADMIN_COMMAND_CATALOG.find((c) => c.cmd === cmd);
+  title.textContent = spec
+    ? `Funções do comando ${spec.syntax} — ${spec.desc}`
+    : `Funções do comando ${cmd}`;
+  title.style.cssText = "color: #ffd966; font-size: 12px;";
+
+  const hideBtn = document.createElement("button");
+  hideBtn.type = "button";
+  hideBtn.textContent = "Ocultar";
+  hideBtn.style.cssText = "padding: 3px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: transparent; color: #ccc; font-size: 11px; cursor: pointer;";
+  hideBtn.addEventListener("click", () => {
+    state.adminActiveCommand = "";
+    renderActiveCommandsStrip();
+    renderAdminCommandFunctionsBelow();
+  });
+
+  titleRow.appendChild(title);
+  titleRow.appendChild(hideBtn);
+  box.appendChild(titleRow);
+
+  if (cmd === "/uid" || cmd === "/minha") {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+    const uidInput = document.createElement("input");
+    uidInput.type = "text";
+    uidInput.value = state.adminDraftUid || state.adminTargetUid || "";
+    uidInput.placeholder = "Cole o UID do jogador...";
+    uidInput.style.cssText = "flex: 1 1 200px; padding: 7px 10px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    uidInput.addEventListener("input", () => {
+      state.adminDraftUid = uidInput.value;
+    });
+
+    const loadBtn = document.createElement("button");
+    loadBtn.type = "button";
+    loadBtn.textContent = "Carregar UID";
+    loadBtn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: none; background: #2b8a6e; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+    loadBtn.addEventListener("click", () => handleAdminLoadTargetUid(uidInput.value));
+
+    const selfBtn = document.createElement("button");
+    selfBtn.type = "button";
+    selfBtn.textContent = "Minha ficha";
+    selfBtn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #e4e4ec; font-size: 12px; cursor: pointer;";
+    selfBtn.addEventListener("click", handleAdminReturnToOwnSheet);
+
+    row.appendChild(uidInput);
+    row.appendChild(loadBtn);
+    row.appendChild(selfBtn);
+    box.appendChild(row);
+
+    if (state.adminRecentUids.length) {
+      const recentRow = document.createElement("div");
+      recentRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center;";
+      const lbl = document.createElement("span");
+      lbl.textContent = "Recentes:";
+      lbl.style.cssText = "font-size: 11px; color: #b8c2cc;";
+      recentRow.appendChild(lbl);
+
+      state.adminRecentUids.forEach((u) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.textContent = u.length > 14 ? `${u.slice(0, 10)}…` : u;
+        chip.style.cssText = "padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: #0a0e12; color: #ffd966; font-size: 11px; cursor: pointer;";
+        chip.addEventListener("click", () => {
+          state.adminDraftUid = u;
+          handleAdminLoadTargetUid(u);
+        });
+        recentRow.appendChild(chip);
+      });
+      box.appendChild(recentRow);
+    }
+    return;
+  }
+
+  if (cmd === "/recado" || cmd === "/urgente" || cmd === "/remover") {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+    const msgInput = document.createElement("input");
+    msgInput.type = "text";
+    msgInput.maxLength = 600;
+    msgInput.value = state.adminDraftNoticeText || "";
+    msgInput.placeholder = "Escreva a mensagem para o UID alvo...";
+    msgInput.style.cssText = "flex: 1 1 200px; padding: 7px 10px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    msgInput.addEventListener("input", () => {
+      state.adminDraftNoticeText = msgInput.value;
+    });
+
+    const prioSelect = document.createElement("select");
+    prioSelect.style.cssText = "padding: 7px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    [
+      { value: "normal", label: "Normal" },
+      { value: "urgent", label: "URGENTE" }
+    ].forEach((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.value;
+      opt.textContent = p.label;
+      if ((cmd === "/urgente" ? "urgent" : state.adminDraftNoticePriority) === p.value) {
+        opt.selected = true;
+      }
+      prioSelect.appendChild(opt);
+    });
+    prioSelect.addEventListener("change", () => {
+      state.adminDraftNoticePriority = prioSelect.value;
+    });
+
+    const durSelect = document.createElement("select");
+    durSelect.style.cssText = "padding: 7px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #ffd966; font-size: 12px; font-weight: 600;";
+    NOTICE_DURATION_PRESETS.forEach((opt) => {
+      const optionEl = document.createElement("option");
+      optionEl.value = String(opt.minutes);
+      optionEl.textContent = opt.label;
+      if (Number(state.adminDraftNoticeMinutes) === opt.minutes) optionEl.selected = true;
+      durSelect.appendChild(optionEl);
+    });
+    durSelect.addEventListener("change", () => {
+      state.adminDraftNoticeMinutes = normalizeNoticeMinutes(durSelect.value);
+    });
+
+    const sendBtn = document.createElement("button");
+    sendBtn.type = "button";
+    sendBtn.textContent = "Enviar recado";
+    sendBtn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: none; background: #c48b1b; color: #111; font-weight: 700; font-size: 12px; cursor: pointer;";
+    sendBtn.addEventListener("click", () =>
+      handleAdminSendNotice({
+        text: msgInput.value,
+        minutes: durSelect.value,
+        priority: prioSelect.value
+      })
+    );
+
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.textContent = "Remover recado";
+    clearBtn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #e4e4ec; font-size: 12px; cursor: pointer;";
+    clearBtn.addEventListener("click", handleAdminClearNotice);
+
+    row.appendChild(msgInput);
+    row.appendChild(prioSelect);
+    row.appendChild(durSelect);
+    row.appendChild(sendBtn);
+    row.appendChild(clearBtn);
+    box.appendChild(row);
+
+    const preview = document.createElement("div");
+    preview.style.cssText = "margin-top: 8px; font-size: 12px; color: #ffe082;";
+    if (!state.activeNotice || Date.now() >= (state.activeNotice.expiresAt || 0)) {
+      preview.textContent = "Recado ativo no alvo: nenhum recado ativo no momento.";
+    } else {
+      const tag = state.activeNotice.priority === "urgent" ? "[URGENTE]" : "[Normal]";
+      preview.textContent = `Recado ativo no alvo ${tag} (${formatRemainingTimeLabel(state.activeNotice.expiresAt)}): "${state.activeNotice.msg}"`;
+    }
+    box.appendChild(preview);
+    return;
+  }
+
+  if (cmd === "/ler") {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.textContent = state.adminReadOnly
+      ? "Somente leitura: ON (clique para liberar edição)"
+      : "Somente leitura: OFF (clique para bloquear edição)";
+    toggleBtn.style.cssText = "padding: 7px 12px; border-radius: 7px; border: 1px solid #ffd966; background: rgba(255,217,102,0.16); color: #ffd966; font-weight: 600; font-size: 12px; cursor: pointer;";
+    toggleBtn.addEventListener("click", handleAdminToggleReadOnly);
+    row.appendChild(toggleBtn);
+    box.appendChild(row);
+    return;
+  }
+
+  if (cmd === "/stats") {
+    syncAdminQuickInputsFromSheet();
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+    const nvInput = document.createElement("input");
+    nvInput.type = "number";
+    nvInput.id = "admin-fn-nv";
+    nvInput.value = state.adminDraftNv;
+    nvInput.min = "1";
+    nvInput.max = "99";
+    nvInput.style.cssText = "width: 66px; padding: 6px 8px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    nvInput.addEventListener("input", () => {
+      state.adminDraftNv = nvInput.value;
+    });
+
+    const rankSelect = document.createElement("select");
+    rankSelect.id = "admin-fn-rank";
+    rankSelect.style.cssText = "padding: 6px 8px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    ALLOWED_RANKS.forEach((rk) => {
+      const opt = document.createElement("option");
+      opt.value = rk;
+      opt.textContent = `Rank ${rk}`;
+      if (state.adminDraftRank === rk) opt.selected = true;
+      rankSelect.appendChild(opt);
+    });
+    rankSelect.addEventListener("change", () => {
+      state.adminDraftRank = rankSelect.value;
+    });
+
+    const slotsInput = document.createElement("input");
+    slotsInput.type = "number";
+    slotsInput.id = "admin-fn-slots";
+    slotsInput.value = state.adminDraftSlots;
+    slotsInput.min = "0";
+    slotsInput.max = "200";
+    slotsInput.style.cssText = "width: 74px; padding: 6px 8px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    slotsInput.addEventListener("input", () => {
+      state.adminDraftSlots = slotsInput.value;
+    });
+
+    const applyBtn = document.createElement("button");
+    applyBtn.type = "button";
+    applyBtn.textContent = "Aplicar e salvar";
+    applyBtn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: none; background: #356899; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+    applyBtn.addEventListener("click", () =>
+      handleAdminApplyQuickStats({
+        nv: nvInput.value,
+        rank: rankSelect.value,
+        slots: slotsInput.value
+      })
+    );
+
+    row.appendChild(nvInput);
+    row.appendChild(rankSelect);
+    row.appendChild(slotsInput);
+    row.appendChild(applyBtn);
+    box.appendChild(row);
+    return;
+  }
+
+  if (cmd === "/modelo") {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+    const sel = document.createElement("select");
+    sel.style.cssText = "flex: 1 1 200px; padding: 7px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    Object.entries(SHEET_TEMPLATES).forEach(([key, tpl]) => {
+      const opt = document.createElement("option");
+      opt.value = key;
+      opt.textContent = tpl.label;
+      if (state.adminDraftTemplate === key) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener("change", () => {
+      state.adminDraftTemplate = sel.value;
+    });
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Clonar modelo na ficha";
+    btn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: none; background: #6b4c9a; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+    btn.addEventListener("click", () => handleAdminApplyTemplate(sel.value));
+
+    row.appendChild(sel);
+    row.appendChild(btn);
+    box.appendChild(row);
+    return;
+  }
+
+  if (cmd === "/diff") {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Atualizar alterações pendentes";
+    btn.style.cssText = "align-self: flex-start; padding: 6px 10px; border-radius: 7px; border: 1px solid rgba(255,217,102,0.45); background: transparent; color: #ffd966; font-size: 12px; cursor: pointer;";
+    btn.addEventListener("click", handleAdminShowDiff);
+
+    const out = document.createElement("div");
+    out.textContent = state.adminDiffText || "Clique para verificar alterações pendentes.";
+    out.style.cssText = "font-size: 12px; color: #d6dee6; white-space: pre-wrap; word-break: break-word;";
+
+    row.appendChild(btn);
+    row.appendChild(out);
+    box.appendChild(row);
+    return;
+  }
+
+  if (cmd === "/json") {
+    const col = document.createElement("div");
+    col.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
+
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px;";
+
+    const expBtn = document.createElement("button");
+    expBtn.type = "button";
+    expBtn.textContent = "Exportar JSON";
+    expBtn.style.cssText = "padding: 6px 10px; border-radius: 7px; border: none; background: #2b8a6e; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+
+    const impBtn = document.createElement("button");
+    impBtn.type = "button";
+    impBtn.textContent = "Importar JSON colado";
+    impBtn.style.cssText = "padding: 6px 10px; border-radius: 7px; border: none; background: #356899; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+
+    const ta = document.createElement("textarea");
+    ta.rows = 3;
+    ta.value = state.adminDraftJson || "";
+    ta.placeholder = "JSON exportado ou colado para importar...";
+    ta.style.cssText = "width: 100%; padding: 8px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.2); background: #0a0e12; color: #d6dee6; font-family: monospace; font-size: 11px;";
+    ta.addEventListener("input", () => {
+      state.adminDraftJson = ta.value;
+    });
+
+    expBtn.addEventListener("click", () => {
+      handleAdminExportJson();
+      ta.value = state.adminDraftJson;
+    });
+    impBtn.addEventListener("click", () => handleAdminImportJson(ta.value));
+
+    btnRow.appendChild(expBtn);
+    btnRow.appendChild(impBtn);
+    col.appendChild(btnRow);
+    col.appendChild(ta);
+    box.appendChild(col);
+    return;
+  }
+
+  if (cmd === "/log") {
+    const ul = document.createElement("ul");
+    ul.style.cssText = "margin: 0; padding-left: 16px; max-height: 120px; overflow-y: auto; font-size: 11px; color: #d6dee6;";
+    if (!state.adminLogs.length) {
+      const li = document.createElement("li");
+      li.textContent = "Nenhuma ação registrada nesta sessão.";
+      ul.appendChild(li);
+    } else {
+      state.adminLogs.forEach((entry) => {
+        const li = document.createElement("li");
+        li.textContent = entry;
+        li.style.marginBottom = "3px";
+        ul.appendChild(li);
+      });
+    }
+    box.appendChild(ul);
+    return;
+  }
+
+  const helpList = document.createElement("ul");
+  helpList.style.cssText = "margin: 0; padding-left: 16px; font-size: 12px; color: #d6dee6;";
+  ADMIN_COMMAND_CATALOG.forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = `${item.syntax} — ${item.desc}`;
+    li.style.marginBottom = "3px";
+    helpList.appendChild(li);
+  });
+  box.appendChild(helpList);
+}
+
+function updateAdminBarUI() {
+  const bar = document.getElementById("admin-uid-bar");
+
+  if (!isCurrentUserAdmin()) {
+    state.adminReadOnly = false;
+    state.adminActiveCommand = "";
+    state.adminAllCommandsActive = false;
+    applySheetReadOnlyState();
+    if (bar) bar.hidden = true;
+    return;
+  }
+
+  ensureAdminBarElement();
+  const activeBar = document.getElementById("admin-uid-bar");
+  const activeBadge = document.getElementById("admin-target-status");
+
+  if (activeBar) activeBar.hidden = false;
+  if (activeBadge) {
+    const modeLabel = state.adminReadOnly ? " · SOMENTE LEITURA" : " · Edição ativa";
+    if (state.adminTargetUid && state.adminTargetUid !== state.user.uid) {
+      activeBadge.textContent = `Alvo: ${state.adminTargetUid}${modeLabel}`;
+    } else {
+      activeBadge.textContent = `Alvo: própria conta (${state.user.uid})${modeLabel}`;
+    }
+  }
+
+  applySheetReadOnlyState();
+  syncAdminQuickInputsFromSheet();
+  renderActiveCommandsStrip();
+  renderAdminCommandFunctionsBelow();
+}
+
+function ensureAdminBarElement() {
+  if (document.getElementById("admin-uid-bar")) return;
+  const appFicha = document.getElementById("app-ficha");
+  const mainEl = document.querySelector("main.container");
+  const anchorParent = mainEl && mainEl.parentNode ? mainEl.parentNode : appFicha;
+  if (!anchorParent) return;
+
+  const bar = document.createElement("section");
+  bar.id = "admin-uid-bar";
+  bar.hidden = true;
+  bar.setAttribute("aria-label", "Prompt de Comando do Administrador");
+  bar.style.cssText = [
+    "margin: 10px auto 12px",
+    "padding: 12px 14px",
+    "max-width: 1120px",
+    "border-radius: 10px",
+    "border: 1px solid rgba(255, 217, 102, 0.45)",
+    "background: rgba(18, 24, 32, 0.96)",
+    "color: #f2f4f8",
+    "display: flex",
+    "flex-direction: column",
+    "gap: 8px"
+  ].join(";");
+
+  const topRow = document.createElement("div");
+  topRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;";
+
+  const title = document.createElement("strong");
+  title.textContent = "Prompt de Comando Admin";
+  title.style.cssText = "color: #ffd966; font-size: 13px;";
+
+  const rightHeader = document.createElement("div");
+  rightHeader.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+  const statusSpan = document.createElement("span");
+  statusSpan.id = "admin-target-status";
+  statusSpan.style.cssText = "font-size: 12px; color: #b8c2cc; word-break: break-all;";
+
+  const allCmdsBtn = document.createElement("button");
+  allCmdsBtn.type = "button";
+  allCmdsBtn.id = "admin-toggle-all-cmds-btn";
+  allCmdsBtn.textContent = "Ativar todos os comandos";
+  allCmdsBtn.style.cssText = [
+    "padding: 6px 10px",
+    "border-radius: 8px",
+    "border: 1px solid rgba(255,255,255,0.25)",
+    "background: transparent",
+    "color: #e4e4ec",
+    "font-size: 12px",
+    "cursor: pointer"
+  ].join(";");
+
+  rightHeader.appendChild(statusSpan);
+  rightHeader.appendChild(allCmdsBtn);
+  topRow.appendChild(title);
+  topRow.appendChild(rightHeader);
+
+  const promptForm = document.createElement("form");
+  promptForm.id = "admin-prompt-form";
+  promptForm.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+  const promptInput = document.createElement("input");
+  promptInput.type = "text";
+  promptInput.id = "admin-prompt-input";
+  promptInput.placeholder = "Digite um comando (ex: /uid, /recado 30 Oi, /ler, /stats, /modelo, /diff, /json, /log)...";
+  promptInput.autocomplete = "off";
+  promptInput.spellcheck = false;
+  promptInput.setAttribute("aria-label", "Prompt de comando do administrador");
+  promptInput.style.cssText = [
+    "flex: 1 1 220px",
+    "min-width: 170px",
+    "padding: 8px 10px",
+    "border-radius: 8px",
+    "border: 1px solid rgba(255,217,102,0.35)",
+    "background: rgba(10,14,18,0.92)",
+    "color: #fff",
+    "font-size: 13px"
+  ].join(";");
+
+  const execBtn = document.createElement("button");
+  execBtn.type = "submit";
+  execBtn.textContent = "Executar";
+  execBtn.style.cssText = [
+    "padding: 8px 14px",
+    "border-radius: 8px",
+    "border: none",
+    "background: #2b8a6e",
+    "color: #fff",
+    "font-weight: 700",
+    "font-size: 13px",
+    "cursor: pointer"
+  ].join(";");
+
+  promptForm.appendChild(promptInput);
+  promptForm.appendChild(execBtn);
+
+  const allCmdsBox = document.createElement("div");
+  allCmdsBox.id = "admin-all-commands-box";
+  allCmdsBox.hidden = true;
+  allCmdsBox.style.cssText = "padding: 8px 10px; border-radius: 8px; background: rgba(10,14,18,0.72); border: 1px solid rgba(255,255,255,0.12);";
+
+  const functionsBelowPanel = document.createElement("div");
+  functionsBelowPanel.id = "admin-command-functions-panel";
+  functionsBelowPanel.hidden = true;
+  functionsBelowPanel.style.cssText = "padding: 10px 12px; border-radius: 8px; background: rgba(10,14,18,0.82); border: 1px solid rgba(255,217,102,0.3);";
+
+  bar.appendChild(topRow);
+  bar.appendChild(promptForm);
+  bar.appendChild(allCmdsBox);
+  bar.appendChild(functionsBelowPanel);
+
+  if (mainEl && mainEl.parentNode === anchorParent) {
+    anchorParent.insertBefore(bar, mainEl);
+  } else {
+    anchorParent.appendChild(bar);
+  }
+
+  allCmdsBtn.addEventListener("click", () => {
+    state.adminAllCommandsActive = !state.adminAllCommandsActive;
+    renderActiveCommandsStrip();
+  });
+
+  promptInput.addEventListener("input", () => {
+    const resolved = resolveCommandNameFromInput(promptInput.value);
+    state.adminActiveCommand = resolved;
+    renderActiveCommandsStrip();
+    renderAdminCommandFunctionsBelow();
+  });
+
+  promptForm.addEventListener("submit", handleAdminPromptSubmit);
+}
+
+async function handleAdminPromptSubmit(event) {
+  event.preventDefault();
+  if (event && event.isTrusted === false) return;
+  if (!isCurrentUserAdmin()) return;
+
+  const input = document.getElementById("admin-prompt-input");
+  const raw = sanitizeText(input ? input.value : "", 700).trim();
+  if (!raw) return;
+
+  const parts = raw.split(/\s+/);
+  const cmd = resolveCommandNameFromInput(parts[0]);
+  state.adminActiveCommand = cmd;
+  renderActiveCommandsStrip();
+
+  if (cmd === "/uid" && parts[1]) {
+    state.adminDraftUid = parts[1];
+    await handleAdminLoadTargetUid(parts[1]);
+    return;
+  }
+
+  if (cmd === "/minha") {
+    await handleAdminReturnToOwnSheet();
+    renderAdminCommandFunctionsBelow();
+    return;
+  }
+
+  if (cmd === "/ler") {
+    const arg = (parts[1] || "").toLowerCase();
+    if (arg === "on" && !state.adminReadOnly) handleAdminToggleReadOnly();
+    else if (arg === "off" && state.adminReadOnly) handleAdminToggleReadOnly();
+    else if (!arg) handleAdminToggleReadOnly();
+    renderAdminCommandFunctionsBelow();
+    return;
+  }
+
+  if ((cmd === "/recado" || cmd === "/urgente") && parts.length >= 3) {
+    const minutes = normalizeNoticeMinutes(parts[1]);
+    const text = parts.slice(2).join(" ");
+    const priority = cmd === "/urgente" ? "urgent" : state.adminDraftNoticePriority;
+    state.adminDraftNoticeText = text;
+    state.adminDraftNoticeMinutes = minutes;
+    state.adminDraftNoticePriority = priority;
+    await handleAdminSendNotice({ text, minutes, priority });
+    renderAdminCommandFunctionsBelow();
+    return;
+  }
+
+  if (cmd === "/remover") {
+    await handleAdminClearNotice();
+    renderAdminCommandFunctionsBelow();
+    return;
+  }
+
+  if (cmd === "/modelo" && parts[1]) {
+    state.adminDraftTemplate = parts[1].toLowerCase();
+    await handleAdminApplyTemplate(parts[1].toLowerCase());
+    renderAdminCommandFunctionsBelow();
+    return;
+  }
+
+  if (cmd === "/diff") {
+    handleAdminShowDiff();
+    renderAdminCommandFunctionsBelow();
+    return;
+  }
+
+  if (cmd === "/json") {
+    if ((parts[1] || "").toLowerCase() === "exportar") {
+      handleAdminExportJson();
+    }
+    renderAdminCommandFunctionsBelow();
+    return;
+  }
+
+  renderAdminCommandFunctionsBelow();
+}
+
+function handleAdminShowDiff() {
+  const changes = computeSheetDiffList();
+  state.adminDiffText = changes.length
+    ? `Alterações detectadas (${changes.length}):\n• ${changes.slice(0, 25).join("\n• ")}`
+    : "Nenhuma alteração pendente em relação à ficha carregada.";
+  renderAdminCommandFunctionsBelow();
+}
+
+function handleAdminExportJson() {
+  if (!isCurrentUserAdmin()) return;
+  const payload = buildSanitizedCloudPayload();
+  const exportObj = {
+    alvoUid: getActiveTargetUid(),
+    exportadoEm: new Date().toISOString(),
+    fields: payload.fields
+  };
+  const serialized = JSON.stringify(exportObj, null, 2);
+  state.adminDraftJson = serialized;
+
+  try {
+    const blob = new Blob([serialized], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ficha_arkan_${getActiveTargetUid() || "backup"}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    // Fallback: JSON exibido na caixa abaixo do comando
+  }
+
+  appendAdminLog(`JSON exportado do UID ${getActiveTargetUid()}`);
+  setStatusBanner("Backup JSON gerado com sucesso.", "success");
+}
+
+async function handleAdminImportJson(rawJsonText) {
+  if (!isCurrentUserAdmin()) return;
+  if (isInspectionReadOnlyActive()) {
+    setStatusBanner("Desative 'Somente leitura' antes de importar um JSON.", "warning");
+    return;
+  }
+
+  const raw = String(rawJsonText ?? state.adminDraftJson ?? "").trim();
+  if (!raw || raw.length > 500000) {
+    setStatusBanner("Cole um JSON válido antes de importar.", "warning");
+    return;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !parsed.fields || typeof parsed.fields !== "object") {
+      setStatusBanner("Formato JSON inválido: objeto 'fields' ausente.", "error");
+      return;
+    }
+
+    const safeFields = createSafeRecord();
+    Object.entries(parsed.fields).slice(0, 1500).forEach(([k, v]) => {
+      if (!isValidFieldKey(k)) return;
+      if (typeof v === "boolean") safeFields[k] = v;
+      else if (typeof v === "string" || typeof v === "number") safeFields[k] = String(v).slice(0, 5000);
+    });
+
+    applySheetData({ fields: safeFields });
+    appendAdminLog(`JSON importado para UID ${getActiveTargetUid()}`);
+    await persistSheet(true);
+  } catch {
+    setStatusBanner("Erro ao ler o JSON colado. Verifique a sintaxe.", "error");
+  }
+}
+
+async function handleAdminApplyTemplate(templateKey) {
+  if (!isCurrentUserAdmin()) return;
+  if (isInspectionReadOnlyActive()) {
+    setStatusBanner("Desative 'Somente leitura' antes de aplicar um modelo.", "warning");
+    return;
+  }
+
+  const tpl = Object.prototype.hasOwnProperty.call(SHEET_TEMPLATES, templateKey)
+    ? SHEET_TEMPLATES[templateKey]
+    : null;
+  if (!tpl) {
+    setStatusBanner("Modelo inválido. Use: iniciante, veterano ou elite.", "warning");
+    return;
+  }
+
+  const currentData = collectSheetData();
+  const mergedFields = createSafeRecord();
+  Object.entries(currentData.fields).forEach(([k, v]) => {
+    if (isValidFieldKey(k)) mergedFields[k] = v;
+  });
+  Object.entries(tpl.fields).forEach(([k, v]) => {
+    if (isValidFieldKey(k)) mergedFields[k] = v;
+  });
+
+  applySheetData({ fields: mergedFields });
+  appendAdminLog(`Modelo "${tpl.label}" aplicado ao UID ${getActiveTargetUid()}`);
+  await persistSheet(true);
+}
+
+function handleAdminToggleReadOnly(event) {
+  if (event && event.isTrusted === false) return;
+  if (!isCurrentUserAdmin()) return;
+
+  state.adminReadOnly = !state.adminReadOnly;
+  if (state.adminReadOnly && state.saveTimer) {
+    clearTimeout(state.saveTimer);
+    state.saveTimer = null;
+  }
+  updateAdminBarUI();
+  appendAdminLog(`Somente leitura alterado para ${state.adminReadOnly ? "ON" : "OFF"}`);
+  setStatusBanner(
+    state.adminReadOnly
+      ? "Modo somente leitura ativado: edição e auto-salvamento pausados."
+      : "Modo somente leitura desativado: edição liberada.",
+    "info"
+  );
+}
+
+async function handleAdminApplyQuickStats(overrideValues) {
+  if (!isCurrentUserAdmin()) return;
+
+  const nvVal = overrideValues && overrideValues.nv !== undefined ? overrideValues.nv : state.adminDraftNv;
+  const rankVal = overrideValues && overrideValues.rank !== undefined ? overrideValues.rank : state.adminDraftRank;
+  const slotsVal = overrideValues && overrideValues.slots !== undefined ? overrideValues.slots : state.adminDraftSlots;
+
+  const sheetNv = document.getElementById("nv-val");
+  const sheetRank = document.getElementById("rank-val");
+  const sheetSlots = document.getElementById("espacos-max");
+
+  if (sheetNv) sheetNv.value = normalizeNumericValue("nv-val", nvVal);
+  if (sheetRank) sheetRank.value = normalizeRankValue(rankVal);
+  if (sheetSlots) sheetSlots.value = normalizeNumericValue("espacos-max", slotsVal);
+
+  recalculateSkillsTable();
+  appendAdminLog(`Ajuste rápido salvo no UID ${getActiveTargetUid()}`);
+  await persistSheet(true);
+}
+
+async function handleAdminLoadTargetUid(rawUidOverride) {
+  if (!isCurrentUserAdmin()) {
+    setStatusBanner("Apenas o administrador autorizado pode carregar fichas por UID.", "error");
+    return;
+  }
+
+  const uid = sanitizeTargetUid(rawUidOverride !== undefined ? rawUidOverride : state.adminDraftUid);
+  if (!uid) {
+    setStatusBanner("Informe um UID válido para carregar a ficha do jogador.", "warning");
+    return;
+  }
+
+  state.adminDraftUid = uid;
+  state.adminTargetUid = uid;
+  saveAdminTargetUidToStorage(uid);
+  recordRecentAdminUid(uid);
+  state.lastSavedSnapshot = "";
+  updateAdminBarUI();
+  appendAdminLog(`Ficha carregada do UID ${uid}`);
+  setStatusBanner(`Carregando ficha do UID ${uid}...`, "info");
+  await loadFromFirestore(uid);
+}
+
+async function handleAdminReturnToOwnSheet(event) {
+  if (event && event.isTrusted === false) return;
+  if (!state.user || !state.user.uid) return;
+
+  state.adminTargetUid = "";
+  state.adminDraftUid = "";
+  saveAdminTargetUidToStorage("");
+  state.lastSavedSnapshot = "";
+  updateAdminBarUI();
+  appendAdminLog("Retornou para a própria ficha do Admin");
+  setStatusBanner("Voltando para a sua própria ficha...", "info");
+  await loadFromFirestore(state.user.uid);
+}
+
+async function handleAdminSendNotice(overrideData) {
+  if (!isCurrentUserAdmin() || !state.firebaseReady || !state.db) {
+    setStatusBanner("Apenas o admin conectado ao Firebase pode enviar recados.", "error");
+    return;
+  }
+
+  const targetUid = sanitizeTargetUid(state.adminTargetUid || state.adminDraftUid || state.user.uid);
+  if (!targetUid) {
+    setStatusBanner("Carregue ou informe um UID válido para enviar a mensagem.", "warning");
+    return;
+  }
+
+  const rawText = overrideData && overrideData.text !== undefined ? overrideData.text : state.adminDraftNoticeText;
+  const rawMin = overrideData && overrideData.minutes !== undefined ? overrideData.minutes : state.adminDraftNoticeMinutes;
+  const rawPrio = overrideData && overrideData.priority !== undefined ? overrideData.priority : state.adminDraftNoticePriority;
+
+  const minutes = normalizeNoticeMinutes(rawMin);
+  const priority = normalizeNoticePriority(rawPrio);
+  const encodedPayload = buildEncodedNoticePayload(rawText, minutes, priority);
+  if (!encodedPayload) {
+    setStatusBanner("Escreva uma mensagem antes de enviar.", "warning");
+    return;
+  }
+
+  state.adminTargetUid = targetUid;
+  saveAdminTargetUidToStorage(targetUid);
+  recordRecentAdminUid(targetUid);
+
+  const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
+  const docRef = doc(state.db, FIRESTORE_COLLECTION, targetUid);
+
+  try {
+    const snap = await getDoc(docRef);
+    const existingFields =
+      snap.exists() && snap.data() && snap.data().fields && typeof snap.data().fields === "object"
+        ? snap.data().fields
+        : createSafeRecord();
+
+    const nextFields = createSafeRecord();
+    Object.entries(existingFields).forEach(([k, v]) => {
+      if (isValidFieldKey(k)) {
+        nextFields[k] = v;
+      }
+    });
+    nextFields[ADMIN_NOTICE_FIELD_KEY] = encodedPayload;
+
+    await setDoc(docRef, {
+      fields: nextFields,
+      atualizadoEm: new Date().toISOString()
+    });
+    state.lastCloudWriteAt = Date.now();
+
+    state.adminDraftNoticeText = "";
+    if (getActiveTargetUid() === targetUid) {
+      state.activeNotice = parseActiveNoticeFromFields(nextFields);
+      scheduleNoticeExpiryCheck();
+      renderPlayerNoticeBanner();
+    }
+
+    renderAdminCommandFunctionsBelow();
+    appendAdminLog(`Recado (${priority === "urgent" ? "Urgente" : "Normal"}, ${formatDurationLabel(minutes)}) enviado para ${targetUid}`);
+    setStatusBanner(
+      `Mensagem enviada para o UID ${targetUid} (duração: ${formatDurationLabel(minutes)}).`,
+      "success"
+    );
+  } catch (err) {
+    const code = err && typeof err.code === "string" ? err.code : "";
+    setStatusBanner(
+      code === "permission-denied"
+        ? "Permissão negada no Firestore ao enviar o recado."
+        : "Erro ao enviar mensagem para o Firestore.",
+      "error"
+    );
+  }
+}
+
+async function handleAdminClearNotice(event) {
+  if (event && event.isTrusted === false) return;
+  if (!isCurrentUserAdmin() || !state.firebaseReady || !state.db) return;
+
+  const targetUid = sanitizeTargetUid(state.adminTargetUid || state.adminDraftUid || state.user.uid);
+  if (!targetUid) {
+    setStatusBanner("Informe um UID válido para remover o recado.", "warning");
+    return;
+  }
+
+  const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
+  const docRef = doc(state.db, FIRESTORE_COLLECTION, targetUid);
+
+  try {
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) {
+      setStatusBanner("Nenhuma ficha encontrada para esse UID.", "info");
+      return;
+    }
+
+    const existingFields =
+      snap.data() && snap.data().fields && typeof snap.data().fields === "object"
+        ? snap.data().fields
+        : createSafeRecord();
+
+    const nextFields = createSafeRecord();
+    Object.entries(existingFields).forEach(([k, v]) => {
+      if (isValidFieldKey(k) && k !== ADMIN_NOTICE_FIELD_KEY) {
+        nextFields[k] = v;
+      }
+    });
+
+    await setDoc(docRef, {
+      fields: nextFields,
+      atualizadoEm: new Date().toISOString()
+    });
+    state.lastCloudWriteAt = Date.now();
+
+    if (getActiveTargetUid() === targetUid) {
+      state.activeNotice = null;
+      scheduleNoticeExpiryCheck();
+      renderPlayerNoticeBanner();
+    }
+
+    renderAdminCommandFunctionsBelow();
+    appendAdminLog(`Recado removido do UID ${targetUid}`);
+    setStatusBanner(`Recado removido do UID ${targetUid}.`, "success");
+  } catch {
+    setStatusBanner("Erro ao remover o recado no Firestore.", "error");
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Cálculo Automático da Tabela de Perícias (#tabela-pericias)
    -------------------------------------------------------------------------- */
 function getSkillAttributeBonus(attrText) {
   const normalized = sanitizeSingleLine(attrText || "", 24)
@@ -353,14 +1736,23 @@ function recalculateSkillsTable() {
     let extrasSum = getSkillGradeBonus(gradeSelect);
     for (let i = 0; i < bonusInputs.length; i += 1) {
       const n = Number(String(bonusInputs[i].value ?? "0").replace(",", "."));
-      if (Number.isFinite(n)) extrasSum += Math.trunc(n);
+      if (Number.isFinite(n)) {
+        extrasSum += Math.trunc(n);
+      }
     }
 
     const attrBonus = getSkillAttributeBonus(attrCell ? attrCell.textContent : "");
-    if (totalInput) totalInput.value = String(attrBonus + extrasSum);
+    const total = attrBonus + extrasSum;
+
+    if (totalInput) {
+      totalInput.value = String(total);
+    }
   });
 }
 
+/* --------------------------------------------------------------------------
+   Cores Dinâmicas por Categoria Principal de Afinidade de Nen
+   -------------------------------------------------------------------------- */
 function normalizeNenCategoryKey(value) {
   if (typeof value !== "string") return "";
   const normalized = value
@@ -383,7 +1775,8 @@ function highlightNenCategoryRow(categoryKey) {
   rows.forEach((row) => {
     const firstCellText = row.cells && row.cells[0] ? row.cells[0].textContent || "" : "";
     const rowKey = normalizeNenCategoryKey(firstCellText);
-    row.classList.toggle("nen-linha-ativa", Boolean(categoryKey) && rowKey === categoryKey);
+    const isMatch = Boolean(categoryKey) && rowKey === categoryKey;
+    row.classList.toggle("nen-linha-ativa", isMatch);
   });
 }
 
@@ -413,9 +1806,24 @@ function syncNenCategoryFromSelect() {
   applyNenCategoryTheme(selectEl.value || selectedText);
 }
 
-/* --------------------------------------------------------------------------
-   5. Privacidade (LGPD) e Navegação por Seção
-   -------------------------------------------------------------------------- */
+function setStatusBanner(message, type = "info") {
+  const banner = document.getElementById("status-banner");
+  if (!banner) return;
+  const cleanMessage = sanitizeSingleLine(message, 220);
+  const allowedTypes = ["info", "success", "warning", "error"];
+  banner.textContent = cleanMessage;
+  banner.dataset.statusType = allowedTypes.includes(type) ? type : "info";
+  banner.hidden = !cleanMessage;
+}
+
+function setEntradaStatus(message) {
+  const statusEl = document.getElementById("entrada-status");
+  if (!statusEl) return;
+  const clean = sanitizeSingleLine(message, 220);
+  statusEl.textContent = clean;
+  statusEl.hidden = !clean;
+}
+
 function hasCookieConsent() {
   if (state.cookieConsentAccepted) return true;
   try {
@@ -443,43 +1851,38 @@ function aceitarLgpdBanner() {
   try {
     localStorage.setItem(STORAGE_KEYS.COOKIE_CONSENT, "accepted");
   } catch {
-    // Mantém em memória se storage estiver indisponível
+    // Mantém o aceite em memória caso o localStorage esteja bloqueado
   }
   setLgpdBannerVisibility(true);
-  if (!state.offlineMode && !state.inspectedTargetUid) {
+  if (!state.offlineMode) {
     saveLocalData(collectSheetData());
   }
 }
 
 window.__aceitarLgpdArkan = aceitarLgpdBanner;
 
+/* --------------------------------------------------------------------------
+   Atualização da Seção Ativa no Topo Conforme Rolagem
+   -------------------------------------------------------------------------- */
 function setActiveSectionIndicator(sectionId) {
   const match = TRACKED_SECTIONS.find((item) => item.id === sectionId) || TRACKED_SECTIONS[0];
   state.activeSectionId = match.id;
 
   const indicatorEl = document.getElementById("secao-atual-topo");
-  if (indicatorEl) indicatorEl.textContent = match.label;
+  if (indicatorEl) {
+    indicatorEl.textContent = match.label;
+  }
 
   const navLinks = document.querySelectorAll(".abas .aba-btn[data-secao-alvo]");
   navLinks.forEach((link) => {
     const isCurrent = link.dataset.secaoAlvo === match.id;
     link.classList.toggle("aba-btn-ativa", isCurrent);
-    if (isCurrent) link.setAttribute("aria-current", "true");
-    else link.removeAttribute("aria-current");
+    if (isCurrent) {
+      link.setAttribute("aria-current", "true");
+    } else {
+      link.removeAttribute("aria-current");
+    }
   });
-}
-
-function navigateToSection(sectionId) {
-  const valid = TRACKED_SECTIONS.find((sec) => sec.id === sectionId);
-  if (!valid) return false;
-  if (valid.id === "admin-painel" && !state.isAdmin) return false;
-
-  const targetEl = document.getElementById(valid.id);
-  if (!targetEl || targetEl.hidden) return false;
-
-  setActiveSectionIndicator(valid.id);
-  targetEl.scrollIntoView({ behavior: "smooth", block: "start" });
-  return true;
 }
 
 function resolveCurrentSectionByViewport() {
@@ -493,15 +1896,14 @@ function resolveCurrentSectionByViewport() {
 
   for (let i = 0; i < TRACKED_SECTIONS.length; i += 1) {
     const secInfo = TRACKED_SECTIONS[i];
-    if (secInfo.id === "admin-painel" && !state.isAdmin) continue;
-
     const secEl = document.getElementById(secInfo.id);
-    if (!secEl || secEl.hidden) continue;
+    if (!secEl) continue;
 
     const rect = secEl.getBoundingClientRect();
     const visibleTop = Math.max(rect.top, topOffset);
     const visibleBottom = Math.min(rect.bottom, viewportBottom);
     const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+
     const crossesAnchor = rect.top <= anchorLine && rect.bottom > topOffset + 12;
     const score = visibleHeight + (crossesAnchor ? viewportBottom : 0);
 
@@ -533,24 +1935,50 @@ function scheduleScrollSectionSync() {
 }
 
 /* --------------------------------------------------------------------------
-   6. Coleta, Normalização e Persistência Local/Nuvem
+   Controle do Ecrã de Entrada (Login Firebase vs. Offline/Local Temporário)
    -------------------------------------------------------------------------- */
-function getActiveTargetUid() {
-  if (state.isAdmin && state.inspectedTargetUid) {
-    return state.inspectedTargetUid;
+function updateScreenAccess() {
+  const entradaScreen = document.getElementById("entrada-screen");
+  const appFicha = document.getElementById("app-ficha");
+  const hasSession = Boolean(state.user) || Boolean(state.offlineMode);
+
+  if (entradaScreen) {
+    entradaScreen.hidden = hasSession;
   }
-  return state.user && state.user.uid ? state.user.uid : "";
+  if (appFicha) {
+    appFicha.hidden = !hasSession;
+  }
+
+  updateAdminBarUI();
+  renderPlayerNoticeBanner();
+
+  if (hasSession) {
+    syncNenCategoryFromSelect();
+    recalculateSkillsTable();
+    window.requestAnimationFrame(() => {
+      syncActiveSectionOnScroll();
+    });
+  }
 }
 
-function isEditingAnotherPlayerSheet() {
-  return Boolean(
-    state.isAdmin &&
-      state.user &&
-      state.inspectedTargetUid &&
-      state.inspectedTargetUid !== state.user.uid
+function enterOfflineTemporaryMode() {
+  state.offlineMode = true;
+  state.activeNotice = null;
+  state.lastSavedSnapshot = "";
+  clearAuthSensitiveInputs();
+  setEntradaStatus("");
+  updateAuthUI();
+  updateScreenAccess();
+  setStatusBanner(
+    "Modo offline/local ativo: as informações não ficam salvas se você carregar a página novamente.",
+    "warning"
   );
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+/* --------------------------------------------------------------------------
+   Coleta, Limpeza e Aplicação Segura de Dados na Ficha
+   -------------------------------------------------------------------------- */
 function buildFieldKey(ctrl, index) {
   if (ctrl.id && /^[a-zA-Z0-9_-]{1,64}$/.test(ctrl.id) && !isForbiddenKey(ctrl.id)) {
     return `id:${ctrl.id}`;
@@ -575,11 +2003,13 @@ function collectSheetData() {
 
   const fields = createSafeRecord();
   const mainEl = document.querySelector("main.container");
-  if (!mainEl) return { fields, atualizadoEm: new Date().toISOString() };
+  if (!mainEl) {
+    return { fields, atualizadoEm: new Date().toISOString() };
+  }
 
   const controls = mainEl.querySelectorAll("input, select, textarea");
   controls.forEach((ctrl, index) => {
-    if (!ctrl || ctrl.closest("#login-firebase") || ctrl.closest("#admin-painel")) return;
+    if (!ctrl || ctrl.closest("#login-firebase")) return;
     const key = buildFieldKey(ctrl, index);
     if (!isValidFieldKey(key)) return;
 
@@ -594,11 +2024,29 @@ function collectSheetData() {
     }
   });
 
-  return { fields, atualizadoEm: new Date().toISOString() };
+  if (state.activeNotice && Date.now() < (state.activeNotice.expiresAt || 0)) {
+    const remainingMinutes = Math.max(
+      1,
+      Math.min(MAX_NOTICE_MINUTES, Math.ceil((state.activeNotice.expiresAt - Date.now()) / 60000))
+    );
+    const reEncoded = buildEncodedNoticePayload(
+      state.activeNotice.msg,
+      remainingMinutes,
+      state.activeNotice.priority
+    );
+    if (reEncoded) {
+      fields[ADMIN_NOTICE_FIELD_KEY] = reEncoded;
+    }
+  }
+
+  return {
+    fields,
+    atualizadoEm: new Date().toISOString()
+  };
 }
 
-function buildSanitizedCloudPayload(sourceData = null) {
-  const raw = sourceData && sourceData.fields ? sourceData : collectSheetData();
+function buildSanitizedCloudPayload() {
+  const raw = collectSheetData();
   const cleanFields = createSafeRecord();
 
   if (raw && raw.fields && typeof raw.fields === "object") {
@@ -606,6 +2054,21 @@ function buildSanitizedCloudPayload(sourceData = null) {
     for (let i = 0; i < entries.length; i += 1) {
       const [key, val] = entries[i];
       if (!isValidFieldKey(key)) continue;
+
+      if (key === ADMIN_NOTICE_FIELD_KEY && typeof val === "string") {
+        const parsedNotice = parseActiveNoticeFromFields({ [ADMIN_NOTICE_FIELD_KEY]: val });
+        if (parsedNotice) {
+          cleanFields[key] = JSON.stringify({
+            msg: parsedNotice.msg,
+            minutes: parsedNotice.minutes,
+            hours: Number((parsedNotice.minutes / 60).toFixed(2)),
+            priority: parsedNotice.priority,
+            sentAt: Date.now(),
+            expiresAt: parsedNotice.expiresAt
+          });
+        }
+        continue;
+      }
 
       if (typeof val === "boolean") {
         cleanFields[key] = val;
@@ -622,22 +2085,35 @@ function buildSanitizedCloudPayload(sourceData = null) {
     }
   }
 
-  return { fields: cleanFields, atualizadoEm: new Date().toISOString() };
+  return {
+    fields: cleanFields,
+    atualizadoEm: new Date().toISOString()
+  };
 }
 
 function applySheetData(data) {
   if (!data || typeof data !== "object" || !data.fields || typeof data.fields !== "object") {
+    state.activeNotice = null;
+    scheduleNoticeExpiryCheck();
+    renderPlayerNoticeBanner();
     recalculateSkillsTable();
     syncNenCategoryFromSelect();
+    syncAdminQuickInputsFromSheet();
+    captureBaselineFields(collectSheetData().fields);
+    renderAdminCommandFunctionsBelow();
     return;
   }
+
+  state.activeNotice = parseActiveNoticeFromFields(data.fields);
+  scheduleNoticeExpiryCheck();
+  renderPlayerNoticeBanner();
 
   const mainEl = document.querySelector("main.container");
   if (!mainEl) return;
 
   const controls = mainEl.querySelectorAll("input, select, textarea");
   controls.forEach((ctrl, index) => {
-    if (!ctrl || ctrl.closest("#login-firebase") || ctrl.closest("#admin-painel")) return;
+    if (!ctrl || ctrl.closest("#login-firebase")) return;
     const key = buildFieldKey(ctrl, index);
     if (!isValidFieldKey(key)) return;
     if (!Object.prototype.hasOwnProperty.call(data.fields, key)) return;
@@ -651,8 +2127,13 @@ function applySheetData(data) {
   });
 
   recalculateSkillsTable();
-  state.lastSavedSnapshot = computeFieldsSnapshot(collectSheetData().fields);
+  const normalizedFields = collectSheetData().fields;
+  captureBaselineFields(normalizedFields);
+  state.lastSavedSnapshot = computeFieldsSnapshot(normalizedFields);
   syncNenCategoryFromSelect();
+  syncAdminQuickInputsFromSheet();
+  applySheetReadOnlyState();
+  renderAdminCommandFunctionsBelow();
 }
 
 function resetSheetFieldsToDefault() {
@@ -661,16 +2142,18 @@ function resetSheetFieldsToDefault() {
 
   const controls = mainEl.querySelectorAll("input, select, textarea");
   controls.forEach((ctrl) => {
-    if (!ctrl || ctrl.closest("#login-firebase") || ctrl.closest("#admin-painel")) return;
+    if (!ctrl || ctrl.closest("#login-firebase")) return;
 
     if (ctrl.type === "checkbox") {
       ctrl.checked = false;
     } else if (ctrl.tagName === "SELECT") {
       ctrl.selectedIndex = 0;
     } else if (ctrl.type === "number") {
-      if (ctrl.id === "def-total" || ctrl.id === "def-esquiva") ctrl.value = "11";
-      else if (ctrl.id === "def-deslocamento") ctrl.value = "9";
-      else if (
+      if (ctrl.id === "def-total" || ctrl.id === "def-esquiva") {
+        ctrl.value = "11";
+      } else if (ctrl.id === "def-deslocamento") {
+        ctrl.value = "9";
+      } else if (
         ctrl.id === "attr-agi" ||
         ctrl.id === "attr-for" ||
         ctrl.id === "attr-ca" ||
@@ -679,8 +2162,11 @@ function resetSheetFieldsToDefault() {
         ctrl.id === "nv-val"
       ) {
         ctrl.value = "1";
-      } else if (ctrl.id === "espacos-max") ctrl.value = "5";
-      else ctrl.value = "0";
+      } else if (ctrl.id === "espacos-max") {
+        ctrl.value = "5";
+      } else {
+        ctrl.value = "0";
+      }
     } else if (ctrl.id === "rank-val") {
       ctrl.value = "E";
     } else {
@@ -690,11 +2176,14 @@ function resetSheetFieldsToDefault() {
 
   recalculateSkillsTable();
   state.lastSavedSnapshot = "";
+  captureBaselineFields(collectSheetData().fields);
   syncNenCategoryFromSelect();
+  syncAdminQuickInputsFromSheet();
 }
 
 function saveLocalData(data) {
-  if (state.offlineMode || isEditingAnotherPlayerSheet() || !hasCookieConsent()) return;
+  if (state.offlineMode) return;
+  if (!hasCookieConsent()) return;
   try {
     const serialized = JSON.stringify(data);
     if (serialized.length > 500000) return;
@@ -726,82 +2215,8 @@ function clearLocalData() {
   }
 }
 
-async function persistSheet(forceWrite = false) {
-  if (state.isSaving || state.isDeleting) return false;
-
-  if (state.isAdmin && state.adminReadOnly) {
-    setStatusBanner("Modo somente leitura ativo: alterações bloqueadas para evitar edição acidental.", "warning");
-    return false;
-  }
-
-  state.isSaving = true;
-
-  try {
-    const payload = collectSheetData();
-    const currentSnapshot = computeFieldsSnapshot(payload.fields);
-
-    if (state.offlineMode && !state.user) {
-      setStatusBanner(
-        "Modo offline/local: alterações não ficam salvas se você carregar a página novamente.",
-        "warning"
-      );
-      return false;
-    }
-
-    if (!forceWrite && currentSnapshot === state.lastSavedSnapshot) return true;
-
-    const targetUid = getActiveTargetUid();
-    const editingOther = isEditingAnotherPlayerSheet();
-
-    if (!editingOther) {
-      saveLocalData(payload);
-    }
-
-    if (state.firebaseReady && state.user && targetUid) {
-      const elapsed = Date.now() - state.lastCloudWriteAt;
-      if (!forceWrite && elapsed < MIN_CLOUD_SAVE_INTERVAL_MS) {
-        scheduleAutoSave();
-        return true;
-      }
-
-      const cloudPayload = buildSanitizedCloudPayload(payload);
-      await saveToFirestore(targetUid, cloudPayload);
-      state.lastSavedSnapshot = computeFieldsSnapshot(cloudPayload.fields);
-      setStatusBanner(
-        editingOther
-          ? `Ficha do jogador (${targetUid}) salva no Firebase.`
-          : "Ficha salva no banco de dados Firebase.",
-        "success"
-      );
-      return true;
-    }
-
-    if (hasCookieConsent() && !editingOther) {
-      state.lastSavedSnapshot = currentSnapshot;
-      setStatusBanner("Alterações salvas localmente.", "info");
-      return true;
-    }
-
-    setStatusBanner("Aceite o banner LGPD para salvar localmente ou faça login no Firebase.", "info");
-    return false;
-  } catch {
-    setStatusBanner("Erro ao salvar no Firebase. Confira as permissões do Firestore.", "error");
-    return false;
-  } finally {
-    state.isSaving = false;
-  }
-}
-
-function scheduleAutoSave() {
-  if (state.isAdmin && state.adminReadOnly) return;
-  if (state.saveTimer) clearTimeout(state.saveTimer);
-  state.saveTimer = setTimeout(() => {
-    persistSheet(false);
-  }, AUTO_SAVE_DEBOUNCE_MS);
-}
-
 /* --------------------------------------------------------------------------
-   7. Autenticação Firebase, Permissão Admin Exclusiva e Mensagens
+   Firebase Authentication + Cloud Firestore
    -------------------------------------------------------------------------- */
 function hasValidFirebaseConfig(cfg) {
   if (!cfg || typeof cfg !== "object") return false;
@@ -836,132 +2251,41 @@ function mapFirebaseAuthError(err) {
   }
 }
 
-function clearAuthSensitiveInputs() {
-  const emailEl = document.getElementById("auth-email");
-  const passEl = document.getElementById("auth-password");
-  if (emailEl) emailEl.value = "";
-  if (passEl) passEl.value = "";
-  state.showPassword = false;
-  updatePasswordVisibilityUI();
-}
-
-function resolveAdminPermission(user) {
-  if (!user || state.offlineMode) return false;
-  return sanitizeSingleLine(user.uid || "", 128) === ADMIN_EXCLUSIVE_UID;
-}
-
-function registerKnownPlayerUid(uid) {
-  const clean = sanitizeSingleLine(uid || "", 128);
-  if (!clean) return;
-  if (!state.knownPlayerUids.includes(clean)) {
-    state.knownPlayerUids.push(clean);
+function formatDatabaseOrHostingError(err) {
+  const code = err && typeof err.code === "string" ? err.code : "";
+  if (navigator.onLine === false) {
+    return "Sem conexão com a internet no momento. Verifique sua rede ou use o modo offline/local.";
   }
-  syncAdminTargetSelectOptions();
-}
-
-function syncAdminTargetSelectOptions() {
-  const selectEl = document.getElementById("admin-target-uid");
-  if (!selectEl) return;
-
-  const ownUid = state.user?.uid || "";
-  const frag = document.createDocumentFragment();
-
-  const selfOpt = document.createElement("option");
-  selfOpt.value = "";
-  selfOpt.textContent = ownUid ? `Minha ficha (${ownUid})` : "Minha própria ficha";
-  frag.appendChild(selfOpt);
-
-  state.knownPlayerUids.forEach((uid) => {
-    if (uid === ownUid) return;
-    const opt = document.createElement("option");
-    opt.value = uid;
-    opt.textContent = uid;
-    frag.appendChild(opt);
-  });
-
-  selectEl.replaceChildren(frag);
-  selectEl.value = state.inspectedTargetUid || "";
-}
-
-async function refreshKnownPlayerUidsFromFirestore() {
-  if (!state.isAdmin || !state.firebaseReady || !state.db) return;
-  try {
-    const { collection, getDocs } = state.firebaseModules.firestoreMod;
-    const snap = await getDocs(collection(state.db, FIRESTORE_COLLECTION));
-    const list = [];
-    snap.forEach((docSnap) => {
-      if (docSnap.id) list.push(docSnap.id);
-    });
-    state.knownPlayerUids = list;
-    syncAdminTargetSelectOptions();
-  } catch {
-    // Mantém lista já conhecida caso listagem não seja necessária
+  if (code === "permission-denied") {
+    return "Erro no banco de dados (Firestore): permissão negada pelas regras de segurança.";
   }
+  if (code === "unavailable" || code === "deadline-exceeded") {
+    return "Erro no banco de dados (Firestore): serviço temporariamente indisponível ou sem resposta.";
+  }
+  if (code === "failed-precondition") {
+    return "Erro no banco de dados (Firestore): pré-condição ou índice pendente no projeto.";
+  }
+  if (code === "auth/network-request-failed") {
+    return "Erro de rede / GitHub Pages ao comunicar com o Firebase.";
+  }
+  return "Não foi possível conectar ao banco de dados ou ao servidor do GitHub Pages ao tentar autenticar.";
 }
 
-async function checkIncomingMessagesForUser(uid) {
-  if (!state.firebaseReady || !state.db || !uid) return;
-  try {
-    const { collection, getDocs, query, where } = state.firebaseModules.firestoreMod;
-    const msgCol = collection(state.db, FIRESTORE_MESSAGES_COLLECTION);
-
-    const [directSnap, globalSnap] = await Promise.all([
-      getDocs(query(msgCol, where("destinatarioUid", "==", uid))),
-      getDocs(query(msgCol, where("destinatarioUid", "==", "ALL")))
-    ]);
-
-    const notices = [];
-    directSnap.forEach((d) => {
-      const data = d.data() || {};
-      if (data.texto) notices.push(`[Direta] ${sanitizeSingleLine(String(data.texto), 200)}`);
-    });
-    globalSnap.forEach((d) => {
-      const data = d.data() || {};
-      if (data.texto) notices.push(`[Geral] ${sanitizeSingleLine(String(data.texto), 200)}`);
-    });
-
-    if (notices.length > 0) {
-      setStatusBanner(`Mensagem da Ordem: ${notices[notices.length - 1]}`, "info");
+async function checkEnvironmentAndFirestoreBeforeLogin() {
+  if (navigator.onLine === false) {
+    throw Object.assign(new Error("Offline"), { code: "offline-browser" });
+  }
+  if (state.db && state.firebaseModules && state.firebaseModules.firestoreMod) {
+    const { doc, getDoc } = state.firebaseModules.firestoreMod;
+    const probeRef = doc(state.db, FIRESTORE_COLLECTION, "__login_check__");
+    try {
+      await getDoc(probeRef);
+    } catch (dbErr) {
+      const dbCode = dbErr && typeof dbErr.code === "string" ? dbErr.code : "";
+      if (dbCode === "unavailable" || dbCode === "deadline-exceeded" || dbCode === "failed-precondition") {
+        throw dbErr;
+      }
     }
-  } catch {
-    // Ignora caso não haja mensagens ou regra esteja em configuração
-  }
-}
-
-async function sendAdminMessage(recipientUid, scope, text) {
-  if (!state.isAdmin || !state.firebaseReady || !state.db || !state.user) return false;
-  const cleanText = sanitizeSingleLine(text, 600);
-  if (!cleanText) return false;
-
-  const { addDoc, collection } = state.firebaseModules.firestoreMod;
-  await addDoc(collection(state.db, FIRESTORE_MESSAGES_COLLECTION), {
-    remetenteUid: state.user.uid,
-    destinatarioUid: recipientUid,
-    escopo: scope,
-    texto: cleanText,
-    criadoEm: new Date().toISOString()
-  });
-  return true;
-}
-
-function updateAdminVisibilityUI() {
-  const adminTab = document.getElementById("aba-admin");
-  const adminSection = document.getElementById("admin-painel");
-  const allowed = Boolean(state.user) && !state.offlineMode && Boolean(state.isAdmin);
-
-  if (adminTab) adminTab.hidden = !allowed;
-  if (adminSection) adminSection.hidden = !allowed;
-
-  if (!allowed) {
-    state.inspectedTargetUid = "";
-    state.adminReadOnly = false;
-    applySheetReadOnlyState(false);
-    if (state.activeSectionId === "admin-painel") {
-      setActiveSectionIndicator("dados-agente");
-    }
-  } else {
-    syncAdminTargetSelectOptions();
-    updateAdminReadOnlyBadge();
   }
 }
 
@@ -989,35 +2313,47 @@ async function initFirebase() {
       state.user = user || null;
       if (user) {
         state.offlineMode = false;
-        state.inspectedTargetUid = "";
+        if (user.uid === ADMIN_UID) {
+          state.adminTargetUid = loadAdminTargetUidFromStorage();
+          state.adminDraftUid = state.adminTargetUid;
+          state.adminRecentUids = loadRecentAdminUidsFromStorage();
+          if (state.adminTargetUid) recordRecentAdminUid(state.adminTargetUid);
+        } else {
+          state.adminTargetUid = "";
+          state.adminDraftUid = "";
+          state.adminRecentUids = [];
+          state.adminReadOnly = false;
+          state.adminActiveCommand = "";
+          state.adminAllCommandsActive = false;
+          saveAdminTargetUidToStorage("");
+        }
         clearAuthSensitiveInputs();
         setEntradaStatus("");
-        state.isAdmin = resolveAdminPermission(user);
-        if (!state.isAdmin) {
-          state.adminReadOnly = false;
-          applySheetReadOnlyState(false);
-        }
       } else {
-        state.isAdmin = false;
-        state.inspectedTargetUid = "";
+        state.adminTargetUid = "";
+        state.adminDraftUid = "";
+        state.adminRecentUids = [];
         state.adminReadOnly = false;
-        applySheetReadOnlyState(false);
+        state.adminActiveCommand = "";
+        state.adminAllCommandsActive = false;
+        state.activeNotice = null;
+        scheduleNoticeExpiryCheck();
+        saveAdminTargetUidToStorage("");
       }
-
       updateAuthUI();
-      updateAdminVisibilityUI();
       updateScreenAccess();
 
-      if (user && !state.isDeleting) {
-        registerKnownPlayerUid(user.uid);
-        setStatusBanner(
-          `Conectado como ${sanitizeSingleLine(user.email || "agente", 160)}. Carregando ficha...`,
-          "info"
-        );
-        await loadFromFirestore(user.uid, { createIfMissingForOwn: true });
-        await checkIncomingMessagesForUser(user.uid);
-        if (state.isAdmin) {
-          await refreshKnownPlayerUidsFromFirestore();
+      if (user) {
+        if (!state.isDeleting) {
+          const targetUid = getActiveTargetUid();
+          const isRemoteTarget = user.uid === ADMIN_UID && targetUid && targetUid !== user.uid;
+          setStatusBanner(
+            isRemoteTarget
+              ? `Admin conectado. Carregando ficha do UID ${targetUid}...`
+              : `Conectado como ${sanitizeSingleLine(user.email || "agente", 160)}. Carregando ficha...`,
+            "info"
+          );
+          await loadFromFirestore(targetUid || user.uid);
         }
       } else if (!state.isDeleting && !state.offlineMode) {
         setStatusBanner("Faça login para salvar e carregar sua ficha no Firebase.", "info");
@@ -1030,9 +2366,8 @@ async function initFirebase() {
   }
 }
 
-async function loadFromFirestore(uid, options = {}) {
-  const { createIfMissingForOwn = false, applyToForm = true } = options;
-  if (!state.firebaseReady || !state.db || !uid) return { ok: false, data: null };
+async function loadFromFirestore(uid) {
+  if (!state.firebaseReady || !state.db || !uid) return;
   const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
 
   try {
@@ -1041,52 +2376,64 @@ async function loadFromFirestore(uid, options = {}) {
 
     if (snap.exists()) {
       const cloudData = snap.data();
-      registerKnownPlayerUid(uid);
-      if (applyToForm) {
-        applySheetData(cloudData);
-        if (!isEditingAnotherPlayerSheet()) {
-          saveLocalData(cloudData);
-        }
-        setStatusBanner("Ficha carregada do banco de dados Firebase.", "success");
+      applySheetData(cloudData);
+      if (!isCurrentUserAdmin() || uid === state.user?.uid) {
+        saveLocalData(cloudData);
       }
-      return { ok: true, data: cloudData };
-    }
-
-    if (createIfMissingForOwn && uid === state.user?.uid) {
+      setStatusBanner(
+        isCurrentUserAdmin() && uid !== state.user?.uid
+          ? `Ficha carregada do UID alvo (${uid}).`
+          : "Ficha carregada do banco de dados Firebase.",
+        "success"
+      );
+    } else {
+      state.activeNotice = null;
+      scheduleNoticeExpiryCheck();
+      renderPlayerNoticeBanner();
       resetSheetFieldsToDefault();
       const initialData = buildSanitizedCloudPayload();
-      state.lastCloudWriteAt = Date.now();
       await setDoc(docRef, initialData);
+      captureBaselineFields(initialData.fields);
       state.lastSavedSnapshot = computeFieldsSnapshot(initialData.fields);
-      saveLocalData(initialData);
-      setStatusBanner("Nova ficha criada na sua conta do Firebase.", "success");
-      return { ok: true, data: initialData };
+      state.lastCloudWriteAt = Date.now();
+      if (!isCurrentUserAdmin() || uid === state.user?.uid) {
+        saveLocalData(initialData);
+      }
+      renderAdminCommandFunctionsBelow();
+      setStatusBanner(
+        isCurrentUserAdmin() && uid !== state.user?.uid
+          ? `Nova ficha criada para o UID alvo (${uid}).`
+          : "Nova ficha criada na sua conta do Firebase.",
+        "success"
+      );
     }
-
-    return { ok: false, data: null };
-  } catch {
-    setStatusBanner("Erro ao ler dados do Firebase. Verifique as regras do Firestore.", "error");
-    return { ok: false, data: null };
+  } catch (err) {
+    const code = err && typeof err.code === "string" ? err.code : "";
+    if (code === "permission-denied") {
+      setStatusBanner("Permissão negada no Firestore ao ler este UID.", "error");
+    } else {
+      setStatusBanner("Erro ao ler dados do Firebase. Verifique as regras do Firestore.", "error");
+    }
   }
 }
 
 async function saveToFirestore(uid, data) {
-  if (!state.firebaseReady || !state.db || !uid) return false;
+  if (!state.firebaseReady || !state.db || !uid || typeof uid !== "string") {
+    return false;
+  }
   const { doc, setDoc } = state.firebaseModules.firestoreMod;
   const docRef = doc(state.db, FIRESTORE_COLLECTION, uid);
   const safeData = data && data.fields ? data : buildSanitizedCloudPayload();
-  state.lastCloudWriteAt = Date.now();
   await setDoc(docRef, safeData, { merge: true });
-  registerKnownPlayerUid(uid);
+  state.lastCloudWriteAt = Date.now();
   return true;
 }
 
 async function handleClearSheetData(event) {
   if (event && event.isTrusted === false) return;
   if (state.isSaving || state.isDeleting) return;
-
-  if (state.isAdmin && state.adminReadOnly) {
-    setStatusBanner("Desative o modo somente leitura (/somente_leitura off) antes de excluir a ficha.", "warning");
+  if (isInspectionReadOnlyActive()) {
+    setStatusBanner("Desative 'Somente leitura' para limpar ou excluir fichas.", "warning");
     return;
   }
 
@@ -1096,24 +2443,27 @@ async function handleClearSheetData(event) {
   }
 
   const targetUid = getActiveTargetUid();
-  const editingOther = isEditingAnotherPlayerSheet();
+  const isRemoteTarget = Boolean(isCurrentUserAdmin() && targetUid && targetUid !== state.user?.uid);
 
+  state.activeNotice = null;
+  scheduleNoticeExpiryCheck();
+  renderPlayerNoticeBanner();
   resetSheetFieldsToDefault();
-  if (!editingOther) {
+  if (!isRemoteTarget) {
     clearLocalData();
   }
 
   const clearConfirmBox = document.getElementById("sheet-clear-confirm-box");
   if (clearConfirmBox) clearConfirmBox.hidden = true;
 
-  if (state.firebaseReady && state.db && state.user && targetUid) {
+  if (state.firebaseReady && state.db && targetUid) {
     const { doc, deleteDoc } = state.firebaseModules.firestoreMod;
     try {
-      state.lastCloudWriteAt = Date.now();
       await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, targetUid));
+      appendAdminLog(`Ficha excluída da nuvem para UID ${targetUid}`);
       setStatusBanner(
-        editingOther
-          ? `Ficha do jogador (${targetUid}) excluída da nuvem.`
+        isRemoteTarget
+          ? `Ficha do UID ${targetUid} excluída da nuvem.`
           : "Ficha excluída da nuvem e do navegador.",
         "success"
       );
@@ -1131,7 +2481,7 @@ async function handleAuthSubmit(event) {
   event.preventDefault();
   if (event && event.isTrusted === false) return;
   if (!state.firebaseReady || !state.auth) {
-    setEntradaStatus("Firebase ainda não foi inicializado.");
+    setEntradaStatus("Firebase ainda não foi inicializado ou houve falha no carregamento do GitHub Pages.");
     return;
   }
 
@@ -1149,6 +2499,7 @@ async function handleAuthSubmit(event) {
 
   try {
     setEntradaStatus(state.authMode === "register" ? "Criando conta..." : "Entrando...");
+    await checkEnvironmentAndFirestoreBeforeLogin();
     if (state.authMode === "register") {
       await createUserWithEmailAndPassword(state.auth, email, password);
     } else {
@@ -1156,18 +2507,36 @@ async function handleAuthSubmit(event) {
     }
     clearAuthSensitiveInputs();
   } catch (err) {
-    setEntradaStatus(mapFirebaseAuthError(err));
+    const code = err && typeof err.code === "string" ? err.code : "";
+    if (
+      navigator.onLine === false ||
+      code === "offline-browser" ||
+      code === "unavailable" ||
+      code === "deadline-exceeded" ||
+      code === "failed-precondition" ||
+      code === "permission-denied" ||
+      code === "auth/network-request-failed"
+    ) {
+      setEntradaStatus(formatDatabaseOrHostingError(err));
+    } else {
+      setEntradaStatus(mapFirebaseAuthError(err));
+    }
   }
 }
 
 async function handleLogout(event) {
   if (event && event.isTrusted === false) return;
   state.offlineMode = false;
-  state.isAdmin = false;
-  state.inspectedTargetUid = "";
+  state.adminTargetUid = "";
+  state.adminDraftUid = "";
+  state.adminRecentUids = [];
   state.adminReadOnly = false;
+  state.adminActiveCommand = "";
+  state.adminAllCommandsActive = false;
+  state.activeNotice = null;
+  scheduleNoticeExpiryCheck();
+  saveAdminTargetUidToStorage("");
   state.lastSavedSnapshot = "";
-  applySheetReadOnlyState(false);
   clearAuthSensitiveInputs();
 
   if (state.firebaseReady && state.auth && state.user) {
@@ -1179,16 +2548,16 @@ async function handleLogout(event) {
       return;
     }
   }
-
   updateAuthUI();
-  updateAdminVisibilityUI();
   updateScreenAccess();
   setEntradaStatus("Você saiu da sessão. Escolha como deseja entrar novamente.");
 }
 
 async function handleDeleteAccount(event) {
   if (event && event.isTrusted === false) return;
-  if (!state.firebaseReady || !state.auth || !state.auth.currentUser || state.isDeleting) return;
+  if (!state.firebaseReady || !state.auth || !state.auth.currentUser || state.isDeleting) {
+    return;
+  }
 
   const currentUser = state.auth.currentUser;
   const uid = currentUser.uid;
@@ -1199,37 +2568,36 @@ async function handleDeleteAccount(event) {
   setStatusBanner("Excluindo conta e dados salvos...", "info");
 
   try {
-    await deleteUser(currentUser);
     if (state.db && uid) {
-      try {
-        state.lastCloudWriteAt = Date.now();
-        await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, uid));
-      } catch {
-        // Ignora erro pós-exclusão da conta
-      }
+      await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, uid));
     }
 
+    await deleteUser(currentUser);
     clearLocalData();
     clearAuthSensitiveInputs();
     state.offlineMode = false;
-    state.isAdmin = false;
-    state.inspectedTargetUid = "";
+    state.adminTargetUid = "";
+    state.adminDraftUid = "";
+    state.adminRecentUids = [];
     state.adminReadOnly = false;
+    state.adminActiveCommand = "";
+    state.adminAllCommandsActive = false;
+    state.activeNotice = null;
+    scheduleNoticeExpiryCheck();
+    saveAdminTargetUidToStorage("");
     state.lastSavedSnapshot = "";
-    applySheetReadOnlyState(false);
 
     const confirmBox = document.getElementById("auth-delete-confirm-box");
     if (confirmBox) confirmBox.hidden = true;
 
     updateAuthUI();
-    updateAdminVisibilityUI();
     updateScreenAccess();
     setEntradaStatus("Conta e ficha excluídas permanentemente do Firebase.");
   } catch (err) {
     if (err && err.code === "auth/requires-recent-login") {
       setStatusBanner("Por segurança, saia e entre novamente antes de excluir a conta.", "warning");
     } else {
-      setStatusBanner("Não foi possível excluir a conta. Tente novamente.", "error");
+      setStatusBanner("Não foi possível excluir a conta. Verifique as regras do Firestore e tente novamente.", "error");
     }
   } finally {
     state.isDeleting = false;
@@ -1237,351 +2605,95 @@ async function handleDeleteAccount(event) {
 }
 
 /* --------------------------------------------------------------------------
-   8. Comandos do Administrador com "/" (1 comando = 1 função específica)
+   Salvamento da Ficha (com proteção contra gravação redundante, inspeção e spam)
    -------------------------------------------------------------------------- */
-function setAdminConsoleOutput(text) {
-  const outEl = document.getElementById("admin-cmd-output");
-  if (!outEl) return;
-  outEl.textContent = sanitizeText(String(text ?? ""), 3000);
-}
-
-function cmdAdminAjuda() {
-  return [
-    "Comandos disponíveis (sempre iniciados com / — 1 comando = 1 função):",
-    "• /ajuda                                   -> Lista todos os comandos disponíveis.",
-    "• /limpar                                  -> Limpa a saída do console admin.",
-    "• /status                                  -> Mostra UID, ficha alvo, modo somente leitura e seção atual.",
-    "• /ver_ficha <uid>                         -> Carrega a ficha de outro jogador para visualizar e alterar.",
-    "• /voltar_minha_ficha                      -> Volta o foco para a sua própria ficha.",
-    "• /salvar                                  -> Salva a ficha carregada (sua ou do jogador alvo).",
-    "• /resetar                                 -> Restaura os campos da ficha atual para o padrão.",
-    "• /nen <categoria>                         -> Aplica reforco | emissao | transformacao | materializacao | manipulacao | especializacao.",
-    "• /rank <E..SSS>                           -> Define o Rank do agente na ficha carregada.",
-    "• /xp <número>                             -> Soma XP ao campo XP Atual da ficha carregada.",
-    "• /ir <secao>                              -> Rola até a seção informada.",
-    "• /msg <uid> <mensagem>                    -> Envia mensagem direcionada a um jogador específico.",
-    "• /broadcast <mensagem>                    -> Envia mensagem para todos os jogadores.",
-    "• /somente_leitura [on|off]                -> Ativa/desativa bloqueio contra alteração acidental.",
-    "• /transferir_ficha <uid_origem> <uid_dst> -> Copia a ficha de um jogador para outro UID."
-  ].join("\n");
-}
-
-function cmdAdminLimpar() {
-  setAdminConsoleOutput("Console limpo.");
-  return null;
-}
-
-function cmdAdminStatus() {
-  const nomeVal = sanitizeSingleLine(document.getElementById("nome")?.value || "(sem nome)", 80);
-  const rankVal = sanitizeSingleLine(document.getElementById("rank-val")?.value || "E", 10);
-  const nenLabel = state.nenCategory ? NEN_SELECT_LABELS[state.nenCategory] : "Nenhuma";
-  const targetUid = getActiveTargetUid();
-
-  return [
-    `Admin UID: ${state.user ? state.user.uid : "N/A"}`,
-    `Ficha carregada UID: ${targetUid || "N/A"} ${isEditingAnotherPlayerSheet() ? "(OUTRO JOGADOR)" : "(PRÓPRIA)"}`,
-    `Somente leitura: ${state.adminReadOnly ? "ATIVADO (bloqueado)" : "DESATIVADO (edição ativa)"}`,
-    `Agente: ${nomeVal} | Rank: ${rankVal} | Nen: ${nenLabel}`,
-    `Seção atual: ${state.activeSectionId}`
-  ].join("\n");
-}
-
-async function cmdAdminVerFicha(args) {
-  const targetUid = sanitizeSingleLine(args[0] || "", 128);
-  if (!targetUid) return "Informe o UID do jogador. Ex: /ver_ficha <uid>";
-  if (!state.firebaseReady || !state.db) return "Firestore não conectado.";
-
-  const res = await loadFromFirestore(targetUid, { createIfMissingForOwn: false, applyToForm: true });
-  if (!res.ok || !res.data) {
-    return `Nenhuma ficha encontrada em fichas_ordem_arkan/${targetUid}.`;
+async function persistSheet(forceWrite = false) {
+  if (state.isSaving || state.isDeleting) return;
+  if (!forceWrite && isInspectionReadOnlyActive()) {
+    return;
   }
-
-  state.inspectedTargetUid = targetUid === state.user?.uid ? "" : targetUid;
-  syncAdminTargetSelectOptions();
-  updateAdminReadOnlyBadge();
-
-  return [
-    `Ficha de "${targetUid}" carregada na tela.`,
-    "Agora você pode alterar os campos e rodar /salvar para gravar na ficha desse jogador.",
-    `Modo atual: ${state.adminReadOnly ? "SOMENTE LEITURA" : "EDIÇÃO LIBERADA"}.`
-  ].join("\n");
-}
-
-async function cmdAdminVoltarMinhaFicha() {
-  if (!state.user?.uid) return "Sessão Firebase não encontrada.";
-  state.inspectedTargetUid = "";
-  syncAdminTargetSelectOptions();
-  updateAdminReadOnlyBadge();
-
-  const res = await loadFromFirestore(state.user.uid, { createIfMissingForOwn: true, applyToForm: true });
-  return res.ok ? "Foco retornado para a sua própria ficha." : "Não foi possível recarregar sua ficha.";
-}
-
-async function cmdAdminSalvar() {
-  if (state.adminReadOnly) {
-    return "Bloqueado: o modo somente leitura está ativo. Use /somente_leitura off para salvar alterações.";
-  }
-  const ok = await persistSheet(true);
-  const targetUid = getActiveTargetUid();
-  return ok
-    ? `Ficha salva com sucesso em fichas_ordem_arkan/${targetUid || "local"}.`
-    : "Não foi possível salvar a ficha.";
-}
-
-function cmdAdminResetar() {
-  if (state.adminReadOnly) {
-    return "Bloqueado: o modo somente leitura está ativo. Use /somente_leitura off para resetar.";
-  }
-  resetSheetFieldsToDefault();
-  scheduleAutoSave();
-  return "Campos da ficha restaurados para o padrão inicial.";
-}
-
-function cmdAdminDefinirNen(args) {
-  if (state.adminReadOnly) {
-    return "Bloqueado: o modo somente leitura está ativo. Use /somente_leitura off para alterar Nen.";
-  }
-  const rawArg = args.join(" ");
-  const key = normalizeNenCategoryKey(rawArg);
-  if (!key) {
-    return "Categoria inválida. Use: /nen reforco | emissao | transformacao | materializacao | manipulacao | especializacao";
-  }
-
-  const selectEl = document.getElementById("categoria-principal-nen");
-  if (selectEl) selectEl.value = NEN_SELECT_LABELS[key];
-  applyNenCategoryTheme(key);
-  scheduleAutoSave();
-  return `Categoria de Nen definida para: ${NEN_SELECT_LABELS[key]}.`;
-}
-
-function cmdAdminDefinirRank(args) {
-  if (state.adminReadOnly) {
-    return "Bloqueado: o modo somente leitura está ativo. Use /somente_leitura off para alterar Rank.";
-  }
-  const rawRank = args[0] || "";
-  if (!rawRank) return "Informe o Rank. Ex: /rank A";
-
-  const rankEl = document.getElementById("rank-val");
-  const normalized = normalizeRankValue(rawRank);
-  if (rankEl) rankEl.value = normalized;
-  scheduleAutoSave();
-  return `Rank atualizado para: ${normalized}.`;
-}
-
-function cmdAdminAdicionarXp(args) {
-  if (state.adminReadOnly) {
-    return "Bloqueado: o modo somente leitura está ativo. Use /somente_leitura off para alterar XP.";
-  }
-  const delta = Number(String(args[0] ?? "").replace(",", "."));
-  if (!Number.isFinite(delta)) return "Informe um número válido. Ex: /xp 150";
-
-  const xpAtualEl = document.getElementById("xp-atual-val");
-  if (!xpAtualEl) return "Campo XP Atual não encontrado.";
-
-  const current = Number(String(xpAtualEl.value || "0").replace(",", ".")) || 0;
-  const next = Math.trunc(current + delta);
-  xpAtualEl.value = String(next);
-  scheduleAutoSave();
-  return `XP Atual alterado de ${Math.trunc(current)} para ${next}.`;
-}
-
-function cmdAdminIrParaSecao(args) {
-  const targetId = sanitizeSingleLine(args[0] || "", 40).toLowerCase();
-  if (!targetId) return "Informe a seção. Ex: /ir guilda";
-
-  const moved = navigateToSection(targetId);
-  return moved ? `Navegado para a seção: ${targetId}.` : `Seção não encontrada ou indisponível: ${targetId}.`;
-}
-
-async function cmdAdminMensagemDireta(args) {
-  const targetUid = sanitizeSingleLine(args[0] || "", 128);
-  const messageText = sanitizeSingleLine(args.slice(1).join(" "), 600);
-  if (!targetUid || !messageText) {
-    return "Uso correto: /msg <uid_jogador> <mensagem>";
-  }
+  state.isSaving = true;
 
   try {
-    await sendAdminMessage(targetUid, "direta", messageText);
-    return `Mensagem enviada para o jogador "${targetUid}": "${messageText}"`;
-  } catch {
-    return "Erro ao enviar mensagem direcionada. Verifique as regras do Firestore para mensagens_ordem_arkan.";
+    const payload = collectSheetData();
+    const currentSnapshot = computeFieldsSnapshot(payload.fields);
+
+    if (state.offlineMode && !state.user) {
+      setStatusBanner(
+        "Modo offline/local: alterações não ficam salvas se você carregar a página novamente.",
+        "warning"
+      );
+      return;
+    }
+
+    if (!forceWrite && currentSnapshot === state.lastSavedSnapshot) {
+      return;
+    }
+
+    const targetUid = getActiveTargetUid();
+    const isRemoteTarget = Boolean(isCurrentUserAdmin() && targetUid && targetUid !== state.user?.uid);
+
+    if (!isRemoteTarget) {
+      saveLocalData(payload);
+    }
+
+    if (state.firebaseReady && state.user && targetUid) {
+      const elapsed = Date.now() - state.lastCloudWriteAt;
+      if (!forceWrite && elapsed < MIN_CLOUD_SAVE_INTERVAL_MS) {
+        scheduleAutoSave();
+        return;
+      }
+
+      const cloudPayload = buildSanitizedCloudPayload();
+      await saveToFirestore(targetUid, cloudPayload);
+      captureBaselineFields(cloudPayload.fields);
+      state.lastSavedSnapshot = computeFieldsSnapshot(cloudPayload.fields);
+      syncAdminQuickInputsFromSheet();
+      setStatusBanner(
+        isRemoteTarget
+          ? `Ficha salva no Firestore para o UID ${targetUid}.`
+          : "Ficha salva no banco de dados Firebase.",
+        "success"
+      );
+    } else if (hasCookieConsent()) {
+      captureBaselineFields(payload.fields);
+      state.lastSavedSnapshot = currentSnapshot;
+      setStatusBanner("Alterações salvas localmente.", "info");
+    } else {
+      setStatusBanner("Aceite o banner LGPD para salvar localmente ou faça login no Firebase.", "info");
+    }
+  } catch (err) {
+    const code = err && typeof err.code === "string" ? err.code : "";
+    if (code === "permission-denied") {
+      setStatusBanner("Permissão negada no Firestore ao salvar a ficha.", "error");
+    } else {
+      setStatusBanner("Erro ao salvar no Firebase. Confira as permissões do Firestore.", "error");
+    }
+  } finally {
+    state.isSaving = false;
   }
 }
 
-async function cmdAdminBroadcast(args) {
-  const messageText = sanitizeSingleLine(args.join(" "), 600);
-  if (!messageText) {
-    return "Uso correto: /broadcast <mensagem para todos os jogadores>";
-  }
-
-  try {
-    await sendAdminMessage("ALL", "global", messageText);
-    return `Mensagem global enviada para todos os jogadores: "${messageText}"`;
-  } catch {
-    return "Erro ao enviar broadcast. Verifique as regras do Firestore para mensagens_ordem_arkan.";
-  }
-}
-
-function cmdAdminSomenteLeitura(args) {
-  const modeArg = sanitizeSingleLine(args[0] || "", 12).toLowerCase();
-
-  if (modeArg === "on" || modeArg === "ativar" || modeArg === "true") {
-    state.adminReadOnly = true;
-  } else if (modeArg === "off" || modeArg === "desativar" || modeArg === "false") {
-    state.adminReadOnly = false;
-  } else {
-    state.adminReadOnly = !state.adminReadOnly;
-  }
-
-  applySheetReadOnlyState(state.adminReadOnly);
-  updateAdminReadOnlyBadge();
-  return state.adminReadOnly
-    ? "Modo SOMENTE LEITURA ATIVADO: alterações na ficha estão bloqueadas para evitar edições acidentais."
-    : "Modo SOMENTE LEITURA DESATIVADO: edição da ficha liberada.";
-}
-
-async function cmdAdminTransferirFicha(args) {
-  if (state.adminReadOnly) {
-    return "Bloqueado: desative o modo somente leitura (/somente_leitura off) antes de transferir fichas.";
-  }
-
-  const sourceUid = sanitizeSingleLine(args[0] || "", 128);
-  const destUid = sanitizeSingleLine(args[1] || "", 128);
-  if (!sourceUid || !destUid) {
-    return "Uso correto: /transferir_ficha <uid_origem> <uid_destino>";
-  }
-  if (sourceUid === destUid) {
-    return "O UID de origem e o UID de destino devem ser diferentes.";
-  }
-  if (!state.firebaseReady || !state.db) {
-    return "Firestore não conectado.";
-  }
-
-  const fetched = await loadFromFirestore(sourceUid, { createIfMissingForOwn: false, applyToForm: false });
-  if (!fetched.ok || !fetched.data) {
-    return `Ficha de origem "${sourceUid}" não encontrada.`;
-  }
-
-  const transferredPayload = buildSanitizedCloudPayload(fetched.data);
-  await saveToFirestore(destUid, transferredPayload);
-
-  state.inspectedTargetUid = destUid === state.user?.uid ? "" : destUid;
-  syncAdminTargetSelectOptions();
-  updateAdminReadOnlyBadge();
-  applySheetData(transferredPayload);
-
-  return `Ficha transferida com sucesso de "${sourceUid}" para "${destUid}" (ficha de destino carregada na tela).`;
-}
-
-const ADMIN_COMMAND_HANDLERS = Object.freeze({
-  ajuda: cmdAdminAjuda,
-  help: cmdAdminAjuda,
-  limpar: cmdAdminLimpar,
-  clear: cmdAdminLimpar,
-  status: cmdAdminStatus,
-  ver_ficha: cmdAdminVerFicha,
-  voltar_minha_ficha: cmdAdminVoltarMinhaFicha,
-  salvar: cmdAdminSalvar,
-  resetar: cmdAdminResetar,
-  nen: cmdAdminDefinirNen,
-  rank: cmdAdminDefinirRank,
-  xp: cmdAdminAdicionarXp,
-  ir: cmdAdminIrParaSecao,
-  msg: cmdAdminMensagemDireta,
-  broadcast: cmdAdminBroadcast,
-  somente_leitura: cmdAdminSomenteLeitura,
-  transferir_ficha: cmdAdminTransferirFicha
-});
-
-async function executeAdminCommand(rawInput) {
-  if (!state.isAdmin || !state.user || state.offlineMode || state.user.uid !== ADMIN_EXCLUSIVE_UID) {
-    setAdminConsoleOutput("Acesso negado: função restrita ao administrador autorizado.");
-    return;
-  }
-
-  const cleaned = sanitizeSingleLine(rawInput || "", 320);
-  if (!cleaned) {
-    setAdminConsoleOutput('Digite um comando começando com /. Ex: "/ajuda".');
-    return;
-  }
-
-  if (!cleaned.startsWith("/")) {
-    setAdminConsoleOutput(`Comandos exigem "/" no início. Ex: "/${cleaned.split(/\s+/)[0]}".`);
-    return;
-  }
-
-  const parts = cleaned.slice(1).trim().split(/\s+/);
-  const cmdName = (parts[0] || "").toLowerCase();
-  const cmdArgs = parts.slice(1);
-
-  if (!cmdName || !Object.prototype.hasOwnProperty.call(ADMIN_COMMAND_HANDLERS, cmdName)) {
-    setAdminConsoleOutput(`Comando desconhecido "/${cmdName}". Digite "/ajuda" para ver os comandos.`);
-    return;
-  }
-
-  const handler = ADMIN_COMMAND_HANDLERS[cmdName];
-  const result = await handler(cmdArgs);
-  if (typeof result === "string") {
-    setAdminConsoleOutput(result);
-  }
+function scheduleAutoSave() {
+  if (isInspectionReadOnlyActive()) return;
+  if (state.saveTimer) clearTimeout(state.saveTimer);
+  state.saveTimer = setTimeout(() => {
+    persistSheet(false);
+  }, 750);
 }
 
 /* --------------------------------------------------------------------------
-   9. Interface, Banners, Modo Somente Leitura e Inicialização
+   Interface e Eventos
    -------------------------------------------------------------------------- */
-function applySheetReadOnlyState(readOnly) {
-  const locked = Boolean(readOnly);
-  const mainEl = document.querySelector("main.container");
-  if (!mainEl) return;
-
-  const controls = mainEl.querySelectorAll("input, select, textarea");
-  controls.forEach((ctrl) => {
-    if (!ctrl || ctrl.closest("#login-firebase") || ctrl.closest("#admin-painel")) return;
-    if (ctrl.tagName === "SELECT" || ctrl.type === "checkbox" || ctrl.type === "date") {
-      ctrl.disabled = locked;
-    } else {
-      ctrl.readOnly = locked;
-      ctrl.setAttribute("aria-readonly", locked ? "true" : "false");
-    }
-  });
-}
-
-function updateAdminReadOnlyBadge() {
-  const badge = document.getElementById("admin-readonly-badge");
-  if (!badge) return;
-  if (state.adminReadOnly) {
-    badge.textContent = "SOMENTE LEITURA (Bloqueado)";
-  } else if (isEditingAnotherPlayerSheet()) {
-    badge.textContent = `Editando Jogador: ${state.inspectedTargetUid}`;
-  } else {
-    badge.textContent = "Edição Liberada";
-  }
-}
-
-function setStatusBanner(message, type = "info") {
-  const banner = document.getElementById("status-banner");
-  if (!banner) return;
-  const cleanMessage = sanitizeSingleLine(message, 240);
-  const allowedTypes = ["info", "success", "warning", "error"];
-  banner.textContent = cleanMessage;
-  banner.dataset.statusType = allowedTypes.includes(type) ? type : "info";
-  banner.hidden = !cleanMessage;
-}
-
-function setEntradaStatus(message) {
-  const statusEl = document.getElementById("entrada-status");
-  if (!statusEl) return;
-  const clean = sanitizeSingleLine(message, 220);
-  statusEl.textContent = clean;
-  statusEl.hidden = !clean;
-}
-
 function updatePasswordVisibilityUI() {
   const passEl = document.getElementById("auth-password");
   const togglePassBtn = document.getElementById("auth-toggle-password");
   const visible = Boolean(state.showPassword);
 
-  if (passEl) passEl.type = visible ? "text" : "password";
+  if (passEl) {
+    passEl.type = visible ? "text" : "password";
+  }
+
   if (togglePassBtn) {
     togglePassBtn.setAttribute("aria-pressed", visible ? "true" : "false");
     togglePassBtn.setAttribute(
@@ -1604,7 +2716,11 @@ function updateAuthUI() {
   if (confirmBox) confirmBox.hidden = true;
   if (clearConfirmBox) clearConfirmBox.hidden = true;
 
-  renderSafeText(submitBtn, state.authMode === "register" ? "Cadastrar" : "Entrar", 40);
+  renderSafeText(
+    submitBtn,
+    state.authMode === "register" ? "Cadastrar" : "Entrar",
+    40
+  );
   renderSafeText(
     toggleBtn,
     state.authMode === "register" ? "Já tenho conta (Entrar)" : "Criar nova conta",
@@ -1626,43 +2742,9 @@ function updateAuthUI() {
     if (offlineBox) offlineBox.hidden = true;
     updatePasswordVisibilityUI();
   }
-}
 
-function updateScreenAccess() {
-  const entradaScreen = document.getElementById("entrada-screen");
-  const appFicha = document.getElementById("app-ficha");
-  const hasSession = Boolean(state.user) || Boolean(state.offlineMode);
-
-  if (entradaScreen) entradaScreen.hidden = hasSession;
-  if (appFicha) appFicha.hidden = !hasSession;
-
-  if (hasSession) {
-    updateAdminVisibilityUI();
-    syncNenCategoryFromSelect();
-    recalculateSkillsTable();
-    window.requestAnimationFrame(() => syncActiveSectionOnScroll());
-  } else {
-    playLoginTitle3DWriting(true);
-  }
-}
-
-function enterOfflineTemporaryMode() {
-  state.offlineMode = true;
-  state.isAdmin = false;
-  state.inspectedTargetUid = "";
-  state.adminReadOnly = false;
-  state.lastSavedSnapshot = "";
-  applySheetReadOnlyState(false);
-  clearAuthSensitiveInputs();
-  setEntradaStatus("");
-  updateAuthUI();
-  updateAdminVisibilityUI();
-  updateScreenAccess();
-  setStatusBanner(
-    "Modo offline/local ativo: as informações não ficam salvas se você carregar a página novamente.",
-    "warning"
-  );
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  updateAdminBarUI();
+  renderPlayerNoticeBanner();
 }
 
 function initLgpdBanner() {
@@ -1671,73 +2753,8 @@ function initLgpdBanner() {
   const acceptBtn = document.getElementById("lgpd-accept-btn");
   if (!acceptBtn || acceptBtn.dataset.lgpdBound === "1") return;
   acceptBtn.dataset.lgpdBound = "1";
+
   acceptBtn.addEventListener("click", aceitarLgpdBanner);
-}
-
-function handleSheetControlMutation(event) {
-  const target = event.target;
-  if (!target || target.closest("#login-firebase") || target.closest("#admin-painel")) return;
-
-  if (state.isAdmin && state.adminReadOnly) {
-    setStatusBanner("Modo somente leitura ativo: edições não são salvas.", "warning");
-    return;
-  }
-
-  if (target.id === "categoria-principal-nen") {
-    const selectedOptionText =
-      target.options && target.selectedIndex >= 0
-        ? target.options[target.selectedIndex].textContent || ""
-        : "";
-    applyNenCategoryTheme(target.value || selectedOptionText);
-  }
-
-  if (
-    target.closest("#tabela-pericias") ||
-    target.id === "attr-agi" ||
-    target.id === "attr-for" ||
-    target.id === "attr-ca" ||
-    target.id === "attr-int" ||
-    target.id === "attr-vig"
-  ) {
-    recalculateSkillsTable();
-  }
-
-  scheduleAutoSave();
-}
-
-function bindAdminEvents() {
-  const cmdForm = document.getElementById("admin-cmd-form");
-  const cmdInput = document.getElementById("admin-cmd-input");
-  const targetSelect = document.getElementById("admin-target-uid");
-
-  if (cmdForm && cmdInput) {
-    cmdForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const value = cmdInput.value;
-      cmdInput.value = "";
-      await executeAdminCommand(value);
-    });
-  }
-
-  if (targetSelect) {
-    targetSelect.addEventListener("change", async () => {
-      if (!state.isAdmin) return;
-      const chosenUid = sanitizeSingleLine(targetSelect.value || "", 128);
-      if (chosenUid) {
-        await executeAdminCommand(`/ver_ficha ${chosenUid}`);
-      } else {
-        await executeAdminCommand("/voltar_minha_ficha");
-      }
-    });
-  }
-
-  const quickButtons = document.querySelectorAll("[data-admin-quick]");
-  quickButtons.forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const cmd = btn.getAttribute("data-admin-quick") || "";
-      await executeAdminCommand(cmd);
-    });
-  });
 }
 
 function bindEvents() {
@@ -1753,7 +2770,9 @@ function bindEvents() {
       const seraOcultado = !rodapePainelLgpd.hidden;
       rodapePainelLgpd.hidden = seraOcultado;
       rodapeDetalhesBtn.setAttribute("aria-expanded", seraOcultado ? "false" : "true");
-      if (rodapeEl) rodapeEl.classList.toggle("rodape-destacado", !seraOcultado);
+      if (rodapeEl) {
+        rodapeEl.classList.toggle("rodape-destacado", !seraOcultado);
+      }
     });
   }
 
@@ -1773,28 +2792,29 @@ function bindEvents() {
   navLinks.forEach((link) => {
     link.addEventListener("click", () => {
       const targetId = link.dataset.secaoAlvo;
-      if (targetId) setActiveSectionIndicator(targetId);
+      if (targetId) {
+        setActiveSectionIndicator(targetId);
+      }
       window.setTimeout(syncActiveSectionOnScroll, 320);
     });
   });
 
   const offlineBtn = document.getElementById("btn-entrar-offline");
-  if (offlineBtn) offlineBtn.addEventListener("click", enterOfflineTemporaryMode);
+  if (offlineBtn) {
+    offlineBtn.addEventListener("click", enterOfflineTemporaryMode);
+  }
 
   const voltarEntradaBtn = document.getElementById("btn-voltar-entrada");
-  if (voltarEntradaBtn) voltarEntradaBtn.addEventListener("click", handleLogout);
+  if (voltarEntradaBtn) {
+    voltarEntradaBtn.addEventListener("click", handleLogout);
+  }
 
   const irLoginNuvemBtn = document.getElementById("btn-ir-login-nuvem");
   if (irLoginNuvemBtn) {
     irLoginNuvemBtn.addEventListener("click", () => {
       state.offlineMode = false;
-      state.isAdmin = false;
-      state.inspectedTargetUid = "";
-      state.adminReadOnly = false;
-      applySheetReadOnlyState(false);
       clearAuthSensitiveInputs();
       updateAuthUI();
-      updateAdminVisibilityUI();
       updateScreenAccess();
       setEntradaStatus("Entre com sua conta Firebase para salvar na nuvem.");
     });
@@ -1811,7 +2831,9 @@ function bindEvents() {
   }
 
   const authForm = document.getElementById("auth-form");
-  if (authForm) authForm.addEventListener("submit", handleAuthSubmit);
+  if (authForm) {
+    authForm.addEventListener("submit", handleAuthSubmit);
+  }
 
   const toggleBtn = document.getElementById("auth-toggle-mode");
   if (toggleBtn) {
@@ -1822,7 +2844,9 @@ function bindEvents() {
   }
 
   const logoutBtn = document.getElementById("auth-logout-btn");
-  if (logoutBtn) logoutBtn.addEventListener("click", handleLogout);
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", handleLogout);
+  }
 
   const clearOpenBtn = document.getElementById("sheet-clear-open-btn");
   const clearConfirmBox = document.getElementById("sheet-clear-confirm-box");
@@ -1848,8 +2872,13 @@ function bindEvents() {
     });
   }
 
-  if (clearConfirmBtn) clearConfirmBtn.addEventListener("click", handleClearSheetData);
-  if (clearOfflineBtn) clearOfflineBtn.addEventListener("click", handleClearSheetData);
+  if (clearConfirmBtn) {
+    clearConfirmBtn.addEventListener("click", handleClearSheetData);
+  }
+
+  if (clearOfflineBtn) {
+    clearOfflineBtn.addEventListener("click", handleClearSheetData);
+  }
 
   if (deleteOpenBtn && deleteConfirmBox) {
     deleteOpenBtn.addEventListener("click", () => {
@@ -1859,36 +2888,43 @@ function bindEvents() {
   }
 
   if (deleteCancelBtn && deleteConfirmBox) {
-    deleteConfirmBox.hidden = true;
-    deleteCancelBtn.addEventListener("click", () => {
+    deleteConfirmBox.addEventListener("click", () => {
       deleteConfirmBox.hidden = true;
     });
   }
 
-  if (deleteConfirmBtn) deleteConfirmBtn.addEventListener("click", handleDeleteAccount);
+  if (deleteConfirmBtn) {
+    deleteConfirmBtn.addEventListener("click", handleDeleteAccount);
+  }
 
   const saveBtn = document.getElementById("btn-save-sheet");
-  if (saveBtn) saveBtn.addEventListener("click", () => persistSheet(true));
+  if (saveBtn) {
+    saveBtn.addEventListener("click", () => persistSheet(true));
+  }
 
   const syncBtn = document.getElementById("auth-sync-btn");
-  if (syncBtn) syncBtn.addEventListener("click", () => persistSheet(true));
+  if (syncBtn) {
+    syncBtn.addEventListener("click", () => persistSheet(true));
+  }
 
   const mainEl = document.querySelector("main.container");
   if (mainEl) {
-    mainEl.addEventListener("input", handleSheetControlMutation);
-    mainEl.addEventListener("change", handleSheetControlMutation);
+    const handleFieldUpdate = (event) => {
+      if (event.target && event.target.closest("#login-firebase")) return;
+      if (isInspectionReadOnlyActive()) return;
+      recalculateSkillsTable();
+      syncAdminQuickInputsFromSheet();
+      scheduleAutoSave();
+    };
+    mainEl.addEventListener("input", handleFieldUpdate);
+    mainEl.addEventListener("change", handleFieldUpdate);
   }
-
-  bindAdminEvents();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   initConsoleSecurityGuard();
   hardenExternalLinks();
   initLgpdBanner();
-  bindEvents();
-  setActiveSectionIndicator("dados-agente");
-  updateAdminVisibilityUI();
 
   const localData = loadLocalData();
   if (localData) {
@@ -1896,10 +2932,13 @@ document.addEventListener("DOMContentLoaded", () => {
   } else {
     recalculateSkillsTable();
     syncNenCategoryFromSelect();
+    syncAdminQuickInputsFromSheet();
+    captureBaselineFields(collectSheetData().fields);
   }
 
+  setActiveSectionIndicator("dados-agente");
   updateAuthUI();
   updateScreenAccess();
-  playLoginTitle3DWriting(true);
+  bindEvents();
   initFirebase();
 });
