@@ -7,7 +7,7 @@
    4. Cálculo de Perícias e Tema Dinâmico de Nen
    5. Privacidade (LGPD) e Navegação por Seção
    6. Coleta, Normalização e Persistência Local/Nuvem
-   7. Autenticação Firebase, Permissão Admin e Exclusão de Ficha/Conta
+   7. Autenticação Firebase, Permissão Admin Exclusiva e Exclusão de Ficha/Conta
    8. Comandos do Administrador (1 comando = 1 função específica)
    9. Interface, Banners e Inicialização
    ========================================================================== */
@@ -33,13 +33,12 @@ const STORAGE_KEYS = Object.freeze({
 
 const FORBIDDEN_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 const FIRESTORE_COLLECTION = "fichas_ordem_arkan";
-const FIRESTORE_USERS_COLLECTION = "usuarios";
 const FIREBASE_SDK_VERSION = "10.14.1";
 const MIN_CLOUD_SAVE_INTERVAL_MS = 1200;
 const AUTO_SAVE_DEBOUNCE_MS = 750;
 
-// Opcional: adicione e-mails em minúsculo se quiser liberar admin por e-mail além do Firestore `usuarios/{uid}`
-const ADMIN_ALLOWED_EMAILS = Object.freeze([]);
+// UID exclusivo autorizado a acessar a função de administrador
+const ADMIN_EXCLUSIVE_UID = "TcudbnuOMcTySJWhz0JHaNDuNU22";
 
 const LOGIN_TYPEWRITER_CONFIG = Object.freeze({
   defaultTitle: "Ordem de Arkan",
@@ -765,7 +764,7 @@ function scheduleAutoSave() {
 }
 
 /* --------------------------------------------------------------------------
-   7. Autenticação Firebase, Permissão Admin e Exclusão de Ficha/Conta
+   7. Autenticação Firebase, Permissão Admin Exclusiva e Exclusão de Ficha/Conta
    -------------------------------------------------------------------------- */
 function hasValidFirebaseConfig(cfg) {
   if (!cfg || typeof cfg !== "object") return false;
@@ -809,26 +808,9 @@ function clearAuthSensitiveInputs() {
   updatePasswordVisibilityUI();
 }
 
-async function resolveAdminPermission(user) {
+function resolveAdminPermission(user) {
   if (!user || state.offlineMode) return false;
-
-  const emailLower = sanitizeSingleLine(user.email || "", 160).toLowerCase();
-  if (emailLower && ADMIN_ALLOWED_EMAILS.includes(emailLower)) {
-    return true;
-  }
-
-  if (!state.firebaseReady || !state.db || !user.uid) return false;
-
-  try {
-    const { doc, getDoc } = state.firebaseModules.firestoreMod;
-    const snap = await getDoc(doc(state.db, FIRESTORE_USERS_COLLECTION, user.uid));
-    if (!snap.exists()) return false;
-    const profile = snap.data() || {};
-    const role = String(profile.role || profile.cargo || "").trim().toLowerCase();
-    return profile.isAdmin === true || role === "admin" || role === "administrador";
-  } catch {
-    return false;
-  }
+  return sanitizeSingleLine(user.uid || "", 128) === ADMIN_EXCLUSIVE_UID;
 }
 
 function updateAdminVisibilityUI() {
@@ -870,7 +852,7 @@ async function initFirebase() {
         state.offlineMode = false;
         clearAuthSensitiveInputs();
         setEntradaStatus("");
-        state.isAdmin = await resolveAdminPermission(user);
+        state.isAdmin = resolveAdminPermission(user);
       } else {
         state.isAdmin = false;
       }
@@ -1204,8 +1186,8 @@ const ADMIN_COMMAND_HANDLERS = Object.freeze({
 });
 
 async function executeAdminCommand(rawInput) {
-  if (!state.isAdmin || !state.user || state.offlineMode) {
-    setAdminConsoleOutput("Acesso negado: função restrita a administradores autenticados.");
+  if (!state.isAdmin || !state.user || state.offlineMode || state.user.uid !== ADMIN_EXCLUSIVE_UID) {
+    setAdminConsoleOutput("Acesso negado: função restrita ao administrador autorizado.");
     return;
   }
 
