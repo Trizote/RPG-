@@ -587,6 +587,35 @@ input:focus, select:focus, textarea:focus {
   color: var(--texto-principal);
 }
 
+/* Barra de Múltiplas Fichas e Backup */
+.slots-ficha-barra,
+.ferramentas-backup-barra {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--borda-sutil);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.slots-ficha-barra label {
+  font-size: 0.84rem;
+  color: var(--texto-suave);
+  font-weight: 600;
+}
+
+.slot-select {
+  width: auto;
+  min-width: 190px;
+  max-width: 280px;
+}
+
+.btn-mini {
+  padding: 6px 12px;
+  font-size: 0.8rem;
+}
+
 .auth-delete-box {
   margin-top: 14px;
   padding: 12px 14px;
@@ -664,7 +693,7 @@ input:focus, select:focus, textarea:focus {
   color: #ffffff;
 }
 
-/* Grid Principal de Status — Masonry fluido sem vãos entre cards em qualquer tela/DPI */
+/* Grid Principal de Status */
 .grid-principal {
   columns: 270px 4;
   column-gap: 16px;
@@ -682,6 +711,24 @@ input:focus, select:focus, textarea:focus {
   display: inline-block;
   width: 100%;
   margin-bottom: 16px;
+}
+
+.card-auto-status {
+  padding: 10px 13px;
+}
+
+.toggle-auto-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--texto-suave);
+  cursor: pointer;
+}
+
+.toggle-auto-status input[type="checkbox"] {
+  width: auto;
+  margin-top: 3px;
 }
 
 .status-grid {
@@ -774,7 +821,102 @@ input:focus, select:focus, textarea:focus {
   text-align: center;
 }
 
-/* Afinidade de Nen */
+/* Afinidade de Nen + Hexágono Visual */
+.nen-hex-box {
+  background-color: rgba(8, 21, 28, 0.9);
+  border: 1px solid var(--nen-borda);
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.nen-hex-svg {
+  width: 100%;
+  max-width: 290px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+.nen-hex-poligono {
+  fill: var(--nen-fundo-suave);
+  stroke: var(--nen-primaria);
+  stroke-width: 2;
+}
+
+.nen-hex-eixo {
+  stroke: rgba(140, 224, 240, 0.2);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.nen-node {
+  cursor: pointer;
+}
+
+.nen-node circle {
+  fill: #0b1c26;
+  stroke: rgba(140, 224, 240, 0.35);
+  stroke-width: 2;
+  transition: fill 0.2s ease, stroke 0.2s ease, stroke-width 0.2s ease;
+}
+
+.nen-node-nome {
+  fill: #eaf4f6;
+  font-size: 8.5px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+.nen-node-pct {
+  fill: #a8c4cb;
+  font-size: 9.5px;
+  font-weight: 800;
+  text-anchor: middle;
+}
+
+.nen-node.ef-100 circle {
+  fill: var(--nen-primaria);
+  stroke: var(--nen-destaque);
+  stroke-width: 3;
+}
+
+.nen-node.ef-100 .nen-node-nome,
+.nen-node.ef-100 .nen-node-pct {
+  fill: var(--nen-texto-contraste);
+}
+
+.nen-node.ef-80 circle {
+  fill: rgba(38, 153, 188, 0.26);
+  stroke: var(--nen-secundaria);
+  stroke-width: 2.2;
+}
+
+.nen-node.ef-80 .nen-node-pct {
+  fill: var(--nen-destaque);
+}
+
+.nen-node.ef-60 circle {
+  fill: rgba(16, 44, 58, 0.92);
+  stroke: rgba(244, 201, 93, 0.45);
+}
+
+.nen-node.ef-40 circle {
+  fill: rgba(56, 22, 31, 0.78);
+  stroke: rgba(248, 113, 113, 0.55);
+}
+
+.nen-node.ef-40 .nen-node-pct {
+  fill: #fca5a5;
+}
+
+.nen-hex-legenda {
+  font-size: 0.78rem;
+  color: var(--texto-suave);
+  margin-top: 6px;
+}
+
 .texto-nen {
   font-size: 0.85rem;
   color: var(--texto-suave);
@@ -802,6 +944,27 @@ input:focus, select:focus, textarea:focus {
   padding: 9px 12px;
   border-radius: 8px;
   margin-bottom: 10px;
+}
+
+/* Alerta de Sobrecarga */
+.alerta-sobrecarga {
+  background-color: rgba(88, 24, 34, 0.92);
+  border: 1px solid rgba(248, 113, 113, 0.55);
+  border-left: 4px solid #ef4444;
+  color: #fecaca;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  margin-bottom: 11px;
+}
+
+.alerta-sobrecarga[hidden] {
+  display: none !important;
+}
+
+.barra-carga.em-sobrecarga {
+  border-color: rgba(239, 68, 68, 0.75);
+  background-color: rgba(68, 20, 28, 0.9);
 }
 
 /* Perícias e Ataques */
@@ -869,7 +1032,6 @@ input:focus, select:focus, textarea:focus {
   text-align: center;
 }
 
-/* Ajustes específicos da tabela de Perícias e contraste em Especialização */
 #tabela-pericias th,
 #tabela-pericias td {
   white-space: nowrap;
@@ -934,11 +1096,69 @@ html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell
   border-radius: 8px;
 }
 
-/* Equipamentos e Habilidades */
+/* Equipamentos e Habilidades (Hatsu) */
 .grid-equip-hab {
   display: grid;
   grid-template-columns: 1.2fr 1fr;
   gap: 16px;
+}
+
+.hab-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.hab-form-grid button {
+  grid-column: 1 / -1;
+}
+
+.lista-habilidades-nen {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.hab-item-card {
+  background-color: var(--bg-campo);
+  border: 1px solid var(--borda-sutil);
+  border-left: 3px solid var(--nen-primaria);
+  border-radius: 9px;
+  padding: 10px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.hab-item-info {
+  flex: 1 1 200px;
+}
+
+.hab-item-titulo {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.hab-item-meta {
+  font-size: 0.77rem;
+  color: var(--nen-destaque);
+  margin-top: 2px;
+}
+
+.hab-item-desc {
+  font-size: 0.82rem;
+  color: var(--texto-suave);
+  margin-top: 4px;
+}
+
+.hab-item-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .barra-carga {
@@ -1018,6 +1238,32 @@ html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell
 
 .totais-guilda div {
   flex: 1;
+}
+
+.guilda-gasto-manual {
+  display: grid;
+  grid-template-columns: 90px 1fr auto;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.guilda-loja-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.guilda-loja-item {
+  background-color: var(--bg-campo);
+  border: 1px solid var(--borda-sutil);
+  border-radius: 8px;
+  padding: 8px 11px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.84rem;
 }
 
 /* Rodapé em Destaque do Criador */
@@ -1167,4 +1413,70 @@ html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell
   color: var(--texto-principal);
   flex: 1;
   min-width: 220px;
+}
+
+/* Versão limpa para Impressão / PDF */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #111111 !important;
+    padding-bottom: 0 !important;
+  }
+
+  .topo,
+  #login-firebase,
+  #admin-uid-bar,
+  #player-admin-notice-banner,
+  .lgpd-banner,
+  .rodape-btn-detalhes,
+  .hab-form-grid,
+  .hab-item-acoes,
+  .guilda-gasto-manual,
+  .guilda-loja-item button,
+  .card-auto-status {
+    display: none !important;
+  }
+
+  .container {
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .card,
+  .campo-box,
+  .nen-hex-box,
+  .hab-item-card,
+  .guilda-loja-item {
+    background: #ffffff !important;
+    color: #111111 !important;
+    border: 1px solid #888888 !important;
+    box-shadow: none !important;
+  }
+
+  .card-header,
+  .tabela-ficha th,
+  .tabela-categorias th,
+  .attr-box {
+    background: #e5e7eb !important;
+    color: #111111 !important;
+    box-shadow: none !important;
+  }
+
+  input,
+  select,
+  textarea {
+    background: #ffffff !important;
+    color: #111111 !important;
+    border: 1px solid #999999 !important;
+  }
+
+  .titulo-secao,
+  .subtitulo-nen,
+  .texto-nen,
+  .nota-nen,
+  label {
+    color: #111111 !important;
+    text-shadow: none !important;
+  }
 }

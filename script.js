@@ -3,15 +3,14 @@
    Segurança front-end (XSS, Prototype Pollution, validação de faixa/tipo,
    anti-spam de escrita, higiene de sessão, isTrusted guard e console guard)
    + Firebase Authentication & Cloud Firestore + Sessão Offline/Local temporária
-   + Modo Administrador por UID (exclusivo): Prompt de Comando, Funções
-     Dinâmicas do Comando Abaixo, Todos os Comandos Ativos, Mensagem até 24h
-     (Normal/Urgente), Somente Leitura, UIDs Recentes, Ajuste Rápido,
-     Modelos Base, Diff, Backup JSON e Log da Sessão
-   + Exclusão de ficha e exclusão de conta
-   + Sincronização precisa das seções no topo conforme a rolagem
-   + Cores dinâmicas conforme a Categoria Principal de Afinidade de Nen
-   + Interatividade do painel de detalhes LGPD no rodapé do criador
-   + Cálculo automático da tabela de Perícias (#tabela-pericias)
+   + Múltiplas Fichas por Conta (slots na mesma conta do Firebase)
+   + Hexágono Visual Interativo de Nen (100%, 80%, 60%, 40%)
+   + Catálogo de Habilidades (Hatsu) e Princípios com gasto automático de PE
+   + Cálculo Automático de Status (Vida, PE, Sanidade, Defesa) com edição manual
+   + Alerta de Sobrecarga e redutor automático (-5) nas perícias com (*)
+   + Exportar e Importar JSON / Impressão PDF para jogadores e modo offline
+   + Loja e Banco da Guilda (Gastar Moedas e catálogo rápido de itens)
+   + Modo Administrador por UID (exclusivo)
    Criador: Lucas Ramalho Gavasso Trizote
    ========================================================================== */
 
@@ -36,10 +35,39 @@ const STORAGE_KEYS = Object.freeze({
 const ADMIN_UID = "TcudbnuOMcTySJWhz0JHaNDuNU22";
 const UID_REGEX = /^[a-zA-Z0-9_-]{10,128}$/;
 const ADMIN_NOTICE_FIELD_KEY = "id:admin_recado_payload";
+const MULTI_SLOTS_FIELD_KEY = "id:multi_fichas_registry";
+const MAX_ACCOUNT_SLOTS = 8;
 const MAX_NOTICE_HOURS = 24;
 const MAX_NOTICE_MINUTES = MAX_NOTICE_HOURS * 60;
 const MAX_RECENT_UIDS = 6;
 const MAX_ADMIN_LOGS = 25;
+const OVERLOAD_SKILL_PENALTY = -5;
+
+const NEN_RING_ORDER = Object.freeze([
+  "reforco",
+  "emissao",
+  "manipulacao",
+  "especializacao",
+  "materializacao",
+  "transformacao"
+]);
+
+const NEN_LABELS = Object.freeze({
+  reforco: "Reforço",
+  emissao: "Emissão",
+  manipulacao: "Manipulação",
+  especializacao: "Especialização",
+  materializacao: "Materialização",
+  transformacao: "Transformação"
+});
+
+const GUILD_SHOP_CATALOG = Object.freeze([
+  { id: "kit-medico", name: "Kit Médico de Campo", category: 1, space: 1, price: 25, desc: "Suprimentos para Medicina" },
+  { id: "kit-pericia", name: "Kit de Perícia Tático", category: 1, space: 1, price: 30, desc: "Ferramentas para testes com #" },
+  { id: "corda-gancho", name: "Corda Tática e Gancho", category: 0, space: 1, price: 15, desc: "Auxílio em escalada e Atletismo" },
+  { id: "comunicador", name: "Comunicador Criptografado", category: 1, space: 0, price: 40, desc: "Rádio de curto/médio alcance" },
+  { id: "estimulante", name: "Tônico Revitalizante", category: 2, space: 1, price: 60, desc: "Recuperação emergencial de vigor" }
+]);
 
 const ADMIN_COMMAND_CATALOG = Object.freeze([
   { cmd: "/uid", syntax: "/uid <UID>", desc: "Carregar ou trocar UID alvo" },
@@ -210,7 +238,14 @@ const state = {
   adminDraftJson: "",
   adminDiffText: "",
   activeNotice: null,
-  noticeExpiryTimer: null
+  noticeExpiryTimer: null,
+  nenAbilities: [],
+  accountSlots: {
+    activeSlotId: "slot-1",
+    slots: {
+      "slot-1": { name: "Agente Principal", fields: createSafeRecord() }
+    }
+  }
 };
 
 /* --------------------------------------------------------------------------
@@ -273,6 +308,9 @@ function normalizeControlValue(ctrl, rawValue) {
   if (ctrl.id === "rank-val") {
     return normalizeRankValue(rawValue);
   }
+  if (ctrl.id === "habilidades-nen-json") {
+    return sanitizeText(String(rawValue ?? "[]"), 15000);
+  }
   if (ctrl.type === "number") {
     return normalizeNumericValue(ctrl.id || "", rawValue);
   }
@@ -318,6 +356,568 @@ function initConsoleSecurityGuard() {
   } catch {
     // Ignora caso console esteja restrito
   }
+}
+
+/* --------------------------------------------------------------------------
+   2. Mecânicas de Nen Interativas: Hexágono Visual + Catálogo de Habilidades
+   -------------------------------------------------------------------------- */
+function computeNenEfficiencyMap(mainCategoryKey) {
+  const result = createSafeRecord();
+  if (!mainCategoryKey || !NEN_RING_ORDER.includes(mainCategoryKey)) {
+    NEN_RING_ORDER.forEach((cat) => {
+      result[cat] = "—";
+    });
+    return result;
+  }
+
+  const mainIdx = NEN_RING_ORDER.indexOf(mainCategoryKey);
+  NEN_RING_ORDER.forEach((cat, idx) => {
+    const rawDiff = Math.abs(mainIdx - idx);
+    const ringDistance = Math.min(rawDiff, NEN_RING_ORDER.length - rawDiff);
+
+    if (mainCategoryKey === "especializacao") {
+      if (ringDistance === 0) result[cat] = "100%";
+      else if (ringDistance === 1) result[cat] = "80%";
+      else if (ringDistance === 2) result[cat] = "60%";
+      else result[cat] = "40%";
+      return;
+    }
+
+    if (cat === "especializacao") {
+      result[cat] = "0% / Esp.";
+      return;
+    }
+
+    if (ringDistance === 0) result[cat] = "100%";
+    else if (ringDistance === 1) result[cat] = "80%";
+    else if (ringDistance === 2) result[cat] = "60%";
+    else result[cat] = "40%";
+  });
+
+  return result;
+}
+
+function updateNenHexagonDiagram(categoryKey) {
+  const effMap = computeNenEfficiencyMap(categoryKey);
+  const legendaEl = document.getElementById("nen-hex-legenda");
+
+  NEN_RING_ORDER.forEach((cat) => {
+    const pctEl = document.getElementById(`hex-pct-${cat}`);
+    const nodeEl = document.querySelector(`.nen-node[data-nen-node="${cat}"]`);
+    const pctStr = effMap[cat] || "—";
+
+    if (pctEl) {
+      pctEl.textContent = pctStr;
+    }
+
+    if (nodeEl) {
+      nodeEl.classList.remove("ef-100", "ef-80", "ef-60", "ef-40");
+      if (pctStr === "100%") nodeEl.classList.add("ef-100");
+      else if (pctStr === "80%") nodeEl.classList.add("ef-80");
+      else if (pctStr === "60%") nodeEl.classList.add("ef-60");
+      else if (pctStr === "40%" || pctStr.startsWith("0%")) nodeEl.classList.add("ef-40");
+    }
+  });
+
+  if (legendaEl) {
+    if (categoryKey && NEN_LABELS[categoryKey]) {
+      legendaEl.textContent = `Categoria Principal: ${NEN_LABELS[categoryKey]} (100%) · Adjacentes: 80% · Distantes: 60% · Oposta: 40%.`;
+    } else {
+      legendaEl.textContent = "Selecione uma categoria principal (ou clique em um vértice) para destacar 100%, 80%, 60% e 40%.";
+    }
+  }
+}
+
+function parseAbilitiesFromHiddenInput() {
+  const hiddenInput = document.getElementById("habilidades-nen-json");
+  if (!hiddenInput || !hiddenInput.value) {
+    state.nenAbilities = [];
+    return;
+  }
+
+  try {
+    const parsed = JSON.parse(hiddenInput.value);
+    if (!Array.isArray(parsed)) {
+      state.nenAbilities = [];
+      return;
+    }
+    state.nenAbilities = parsed
+      .slice(0, 40)
+      .filter((item) => item && typeof item === "object")
+      .map((item, idx) => ({
+        id: sanitizeSingleLine(String(item.id || `hab-${idx}-${Date.now()}`), 48),
+        name: sanitizeSingleLine(String(item.name || "Técnica"), 80),
+        type: sanitizeSingleLine(String(item.type || "Princípio Básico"), 40),
+        cost: Math.min(999, Math.max(0, Math.trunc(Number(item.cost) || 0))),
+        desc: sanitizeSingleLine(String(item.desc || ""), 220)
+      }));
+  } catch {
+    state.nenAbilities = [];
+  }
+}
+
+function syncAbilitiesToHiddenInput() {
+  const hiddenInput = document.getElementById("habilidades-nen-json");
+  if (hiddenInput) {
+    hiddenInput.value = JSON.stringify(state.nenAbilities);
+  }
+}
+
+function useNenAbility(ability) {
+  if (!ability || isInspectionReadOnlyActive()) return;
+  const peAtualEl = document.getElementById("pe-atual");
+  const peGastoEl = document.getElementById("pe-gasto");
+  if (!peAtualEl) return;
+
+  const currentPe = Math.trunc(Number(peAtualEl.value) || 0);
+  const cost = Math.max(0, Math.trunc(Number(ability.cost) || 0));
+
+  if (currentPe < cost) {
+    setStatusBanner(
+      `PE insuficiente para usar "${ability.name}" (custo: ${cost} PE · atual: ${currentPe} PE).`,
+      "warning"
+    );
+    return;
+  }
+
+  peAtualEl.value = String(currentPe - cost);
+  if (peGastoEl) {
+    const spentPe = Math.trunc(Number(peGastoEl.value) || 0);
+    peGastoEl.value = String(spentPe + cost);
+  }
+
+  setStatusBanner(
+    `Habilidade "${ability.name}" ativada (-${cost} PE). Restante: ${currentPe - cost} PE.`,
+    "success"
+  );
+  scheduleAutoSave();
+}
+
+function renderNenAbilitiesList() {
+  const container = document.getElementById("lista-habilidades-nen");
+  if (!container) return;
+
+  container.innerHTML = "";
+  if (!state.nenAbilities.length) {
+    const empty = document.createElement("p");
+    empty.className = "texto-nen";
+    empty.textContent = "Nenhuma técnica cadastrada ainda. Adicione Ten, Zetsu, Ren ou seu Hatsu acima.";
+    container.appendChild(empty);
+    return;
+  }
+
+  state.nenAbilities.forEach((hab) => {
+    const card = document.createElement("div");
+    card.className = "hab-item-card";
+
+    const info = document.createElement("div");
+    info.className = "hab-item-info";
+
+    const title = document.createElement("div");
+    title.className = "hab-item-titulo";
+    title.textContent = hab.name;
+
+    const meta = document.createElement("div");
+    meta.className = "hab-item-meta";
+    meta.textContent = `${hab.type} · Custo: ${hab.cost} PE`;
+
+    info.appendChild(title);
+    info.appendChild(meta);
+
+    if (hab.desc) {
+      const desc = document.createElement("div");
+      desc.className = "hab-item-desc";
+      desc.textContent = hab.desc;
+      info.appendChild(desc);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "hab-item-acoes";
+
+    const useBtn = document.createElement("button");
+    useBtn.type = "button";
+    useBtn.className = "btn-arkan btn-azul btn-mini";
+    useBtn.textContent = `Usar Habilidade (-${hab.cost} PE)`;
+    useBtn.addEventListener("click", () => useNenAbility(hab));
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "btn-arkan btn-perigo btn-mini";
+    delBtn.textContent = "Remover";
+    delBtn.addEventListener("click", () => {
+      if (isInspectionReadOnlyActive()) return;
+      state.nenAbilities = state.nenAbilities.filter((item) => item.id !== hab.id);
+      syncAbilitiesToHiddenInput();
+      renderNenAbilitiesList();
+      scheduleAutoSave();
+    });
+
+    actions.appendChild(useBtn);
+    actions.appendChild(delBtn);
+
+    card.appendChild(info);
+    card.appendChild(actions);
+    container.appendChild(card);
+  });
+}
+
+function handleAddNenAbility() {
+  if (isInspectionReadOnlyActive()) return;
+  const nameEl = document.getElementById("hab-nome-input");
+  const typeEl = document.getElementById("hab-tipo-input");
+  const costEl = document.getElementById("hab-custo-input");
+  const descEl = document.getElementById("hab-desc-input");
+
+  const name = sanitizeSingleLine(nameEl ? nameEl.value : "", 80);
+  if (!name) {
+    setStatusBanner("Informe o nome da técnica ou Hatsu antes de adicionar.", "warning");
+    return;
+  }
+
+  const type = sanitizeSingleLine(typeEl ? typeEl.value : "Princípio Básico", 40);
+  const cost = Math.min(999, Math.max(0, Math.trunc(Number(costEl ? costEl.value : 0) || 0)));
+  const desc = sanitizeSingleLine(descEl ? descEl.value : "", 220);
+
+  state.nenAbilities.push({
+    id: `hab-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    name,
+    type,
+    cost,
+    desc
+  });
+
+  if (nameEl) nameEl.value = "";
+  if (descEl) descEl.value = "";
+
+  syncAbilitiesToHiddenInput();
+  renderNenAbilitiesList();
+  setStatusBanner(`Técnica "${name}" adicionada ao catálogo de Nen.`, "success");
+  scheduleAutoSave();
+}
+
+/* --------------------------------------------------------------------------
+   3. Automação e QoL: Status Automáticos + Alerta de Sobrecarga + JSON/PDF
+   -------------------------------------------------------------------------- */
+function recalculateAutoStatusValues() {
+  const autoCheck = document.getElementById("auto-calc-status");
+  if (!autoCheck || !autoCheck.checked) return;
+
+  const nv = Math.max(1, Math.trunc(Number(document.getElementById("nv-val")?.value) || 1));
+  const agi = Math.trunc(Number(document.getElementById("attr-agi")?.value) || 1);
+  const ca = Math.trunc(Number(document.getElementById("attr-ca")?.value) || 1);
+  const vig = Math.trunc(Number(document.getElementById("attr-vig")?.value) || 1);
+
+  const vidaMaxEl = document.getElementById("vida-max");
+  const peMaxEl = document.getElementById("pe-max");
+  const sanMaxEl = document.getElementById("san-max");
+  const defTotalEl = document.getElementById("def-total");
+  const defEsquivaEl = document.getElementById("def-esquiva");
+
+  const calcVidaMax = Math.max(1, 16 + vig * 4 + (nv - 1) * (4 + Math.max(0, vig)));
+  const calcPeMax = Math.max(1, 4 + ca * 3 + (nv - 1) * (2 + Math.max(0, ca)));
+  const calcSanMax = Math.max(1, 12 + ca * 3 + (nv - 1) * 3);
+  const defOutros = Math.trunc(Number(document.getElementById("def-total-outros")?.value) || 0);
+  const esqOutros = Math.trunc(Number(document.getElementById("def-esquiva-outros")?.value) || 0);
+  const calcDef = 10 + agi + defOutros;
+  const calcEsq = 10 + agi + esqOutros;
+
+  if (vidaMaxEl && document.activeElement !== vidaMaxEl) vidaMaxEl.value = String(calcVidaMax);
+  if (peMaxEl && document.activeElement !== peMaxEl) peMaxEl.value = String(calcPeMax);
+  if (sanMaxEl && document.activeElement !== sanMaxEl) sanMaxEl.value = String(calcSanMax);
+  if (defTotalEl && document.activeElement !== defTotalEl) defTotalEl.value = String(calcDef);
+  if (defEsquivaEl && document.activeElement !== defEsquivaEl) defEsquivaEl.value = String(calcEsq);
+}
+
+function evaluateOverloadState() {
+  const sumIntCheck = document.getElementById("somar-intelecto");
+  const espacosAtualEl = document.getElementById("espacos-atual");
+  const espacosMaxEl = document.getElementById("espacos-max");
+  const intAttrEl = document.getElementById("attr-int");
+
+  const currentLoad = Math.trunc(Number(espacosAtualEl?.value) || 0);
+  const baseMaxSlots = Math.trunc(Number(espacosMaxEl?.value) || 5);
+  const intBonus = sumIntCheck && sumIntCheck.checked ? Math.max(0, Math.trunc(Number(intAttrEl?.value) || 0)) : 0;
+  const effectiveMaxSlots = baseMaxSlots + intBonus;
+
+  const isOverloaded = currentLoad > effectiveMaxSlots;
+
+  const alertSkills = document.getElementById("alerta-sobrecarga-pericias");
+  const alertEquip = document.getElementById("alerta-sobrecarga-equip");
+  const cargaBar = document.getElementById("barra-carga-container");
+
+  if (alertSkills) alertSkills.hidden = !isOverloaded;
+  if (alertEquip) alertEquip.hidden = !isOverloaded;
+  if (cargaBar) cargaBar.classList.toggle("em-sobrecarga", isOverloaded);
+
+  return isOverloaded;
+}
+
+function handleUserExportJson() {
+  const payload = buildSanitizedCloudPayload();
+  const exportObj = {
+    sistema: "Ordem de Arkan",
+    exportadoEm: new Date().toISOString(),
+    nomeAgente: sanitizeSingleLine(document.getElementById("nome")?.value || "agente", 60) || "agente",
+    fields: payload.fields
+  };
+
+  const serialized = JSON.stringify(exportObj, null, 2);
+  const safeFileSlug = exportObj.nomeAgente
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .toLowerCase();
+
+  try {
+    const blob = new Blob([serialized], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ficha_arkan_${safeFileSlug || "agente"}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setStatusBanner("Arquivo JSON da ficha baixado com sucesso.", "success");
+  } catch {
+    setStatusBanner("Não foi possível baixar o arquivo JSON neste navegador.", "error");
+  }
+}
+
+function handleUserImportJsonFile(event) {
+  if (isInspectionReadOnlyActive()) {
+    setStatusBanner("Desative 'Somente leitura' antes de importar uma ficha.", "warning");
+    return;
+  }
+
+  const fileInput = event.target;
+  const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+  if (!file) return;
+
+  if (file.size > 500000) {
+    setStatusBanner("Arquivo JSON muito grande (limite: 500 KB).", "error");
+    fileInput.value = "";
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const parsed = JSON.parse(String(reader.result || ""));
+      if (!parsed || typeof parsed !== "object" || !parsed.fields || typeof parsed.fields !== "object") {
+        setStatusBanner("Arquivo JSON inválido: estrutura de ficha não reconhecida.", "error");
+        return;
+      }
+
+      const safeFields = createSafeRecord();
+      Object.entries(parsed.fields).slice(0, 1500).forEach(([k, v]) => {
+        if (!isValidFieldKey(k) || k === ADMIN_NOTICE_FIELD_KEY || k === MULTI_SLOTS_FIELD_KEY) return;
+        if (typeof v === "boolean") safeFields[k] = v;
+        else if (typeof v === "string" || typeof v === "number") safeFields[k] = String(v).slice(0, 5000);
+      });
+
+      applySheetData({ fields: safeFields });
+      setStatusBanner("Ficha importada com sucesso a partir do arquivo JSON.", "success");
+      await persistSheet(true);
+    } catch {
+      setStatusBanner("Erro ao ler o arquivo JSON selecionado.", "error");
+    } finally {
+      fileInput.value = "";
+    }
+  };
+  reader.readAsText(file);
+}
+
+/* --------------------------------------------------------------------------
+   4. Recursos para Aba Guilda (Loja/Banco) e Múltiplas Fichas por Conta
+   -------------------------------------------------------------------------- */
+function renderGuildShopCatalog() {
+  const listEl = document.getElementById("guilda-loja-lista");
+  if (!listEl) return;
+
+  listEl.innerHTML = "";
+  GUILD_SHOP_CATALOG.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "guilda-loja-item";
+
+    const info = document.createElement("div");
+    info.innerHTML = `<strong>${item.name}</strong> · Cat. ${item.category} · Espaço ${item.space} · <strong>${item.price} moedas</strong><br><small>${item.desc}</small>`;
+
+    const buyBtn = document.createElement("button");
+    buyBtn.type = "button";
+    buyBtn.className = "btn-arkan btn-azul btn-mini";
+    buyBtn.textContent = `Comprar (${item.price})`;
+    buyBtn.addEventListener("click", () => handleBuyGuildShopItem(item));
+
+    row.appendChild(info);
+    row.appendChild(buyBtn);
+    listEl.appendChild(row);
+  });
+}
+
+function spendGuildCoins(amount, reasonText) {
+  if (isInspectionReadOnlyActive()) return false;
+  const coinsEl = document.getElementById("guilda-moedas-total");
+  if (!coinsEl) return false;
+
+  const currentCoins = Math.trunc(Number(coinsEl.value) || 0);
+  const cost = Math.max(1, Math.trunc(Number(amount) || 0));
+
+  if (currentCoins < cost) {
+    setStatusBanner(
+      `Moedas insuficientes na Guilda (necessário: ${cost} · saldo atual: ${currentCoins}).`,
+      "warning"
+    );
+    return false;
+  }
+
+  coinsEl.value = String(currentCoins - cost);
+  setStatusBanner(
+    `Gasto registrado: -${cost} moedas (${sanitizeSingleLine(reasonText, 80)}). Saldo restante: ${currentCoins - cost}.`,
+    "success"
+  );
+  scheduleAutoSave();
+  return true;
+}
+
+function addItemToInventoryFirstFreeRow(item) {
+  const rows = document.querySelectorAll("#tabela-itens tbody tr");
+  for (let i = 0; i < rows.length; i += 1) {
+    const inputs = rows[i].querySelectorAll("input");
+    if (inputs.length >= 4 && !inputs[0].value.trim()) {
+      inputs[0].value = item.name;
+      inputs[1].value = item.desc;
+      inputs[2].value = String(item.category);
+      inputs[3].value = String(item.space);
+      return true;
+    }
+  }
+  return false;
+}
+
+function handleBuyGuildShopItem(item) {
+  if (!spendGuildCoins(item.price, `Compra: ${item.name}`)) return;
+
+  const added = addItemToInventoryFirstFreeRow(item);
+  const espacosAtualEl = document.getElementById("espacos-atual");
+  if (espacosAtualEl && item.space > 0) {
+    const cur = Math.trunc(Number(espacosAtualEl.value) || 0);
+    espacosAtualEl.value = String(cur + item.space);
+  }
+
+  recalculateSkillsTable();
+  if (!added) {
+    setStatusBanner(
+      `Compra de "${item.name}" debitada (-${item.price} moedas), mas a tabela de itens está cheia.`,
+      "warning"
+    );
+  }
+  scheduleAutoSave();
+}
+
+function syncSlotDropdownUI() {
+  const selectEl = document.getElementById("ficha-slot-select");
+  if (!selectEl) return;
+
+  const slotEntries = Object.entries(state.accountSlots.slots || {});
+  selectEl.innerHTML = "";
+
+  slotEntries.forEach(([slotId, slotData], idx) => {
+    const opt = document.createElement("option");
+    opt.value = slotId;
+    const displayName = sanitizeSingleLine(slotData?.name || `Agente ${idx + 1}`, 45) || `Agente ${idx + 1}`;
+    opt.textContent = `${idx + 1}. ${displayName}`;
+    if (slotId === state.accountSlots.activeSlotId) {
+      opt.selected = true;
+    }
+    selectEl.appendChild(opt);
+  });
+}
+
+function extractCurrentFormFieldsOnly() {
+  const raw = collectSheetData().fields;
+  const clean = createSafeRecord();
+  Object.entries(raw).forEach(([k, v]) => {
+    if (isValidFieldKey(k) && k !== ADMIN_NOTICE_FIELD_KEY && k !== MULTI_SLOTS_FIELD_KEY) {
+      clean[k] = v;
+    }
+  });
+  return clean;
+}
+
+function saveCurrentFormIntoActiveSlotMemory() {
+  const activeId = state.accountSlots.activeSlotId || "slot-1";
+  const currentFields = extractCurrentFormFieldsOnly();
+  const agentName = sanitizeSingleLine(currentFields["id:nome"] || "", 45) || "Agente sem nome";
+  state.accountSlots.slots[activeId] = {
+    name: agentName,
+    fields: currentFields
+  };
+  syncSlotDropdownUI();
+}
+
+async function handleSwitchAccountSlot(nextSlotId) {
+  if (!nextSlotId || nextSlotId === state.accountSlots.activeSlotId) return;
+  if (!Object.prototype.hasOwnProperty.call(state.accountSlots.slots, nextSlotId)) return;
+
+  saveCurrentFormIntoActiveSlotMemory();
+  state.accountSlots.activeSlotId = nextSlotId;
+
+  const targetSlot = state.accountSlots.slots[nextSlotId];
+  resetSheetFieldsToDefault();
+  applySheetData({ fields: targetSlot.fields || createSafeRecord() }, true);
+  syncSlotDropdownUI();
+  setStatusBanner(`Ficha alternada para "${targetSlot.name}".`, "info");
+  await persistSheet(true);
+}
+
+async function handleCreateNewAccountSlot() {
+  if (isInspectionReadOnlyActive()) return;
+  const existingKeys = Object.keys(state.accountSlots.slots || {});
+  if (existingKeys.length >= MAX_ACCOUNT_SLOTS) {
+    setStatusBanner(`Limite máximo de ${MAX_ACCOUNT_SLOTS} fichas por conta atingido.`, "warning");
+    return;
+  }
+
+  saveCurrentFormIntoActiveSlotMemory();
+  const newId = `slot-${Date.now()}`;
+  const label = `Novo Agente #${existingKeys.length + 1}`;
+
+  resetSheetFieldsToDefault();
+  const nomeEl = document.getElementById("nome");
+  if (nomeEl) nomeEl.value = label;
+
+  state.accountSlots.activeSlotId = newId;
+  state.accountSlots.slots[newId] = {
+    name: label,
+    fields: extractCurrentFormFieldsOnly()
+  };
+
+  syncSlotDropdownUI();
+  setStatusBanner(`Nova ficha "${label}" criada na sua conta.`, "success");
+  await persistSheet(true);
+}
+
+async function handleDeleteCurrentAccountSlot() {
+  if (isInspectionReadOnlyActive()) return;
+  const keys = Object.keys(state.accountSlots.slots || {});
+  if (keys.length <= 1) {
+    setStatusBanner("Você precisa manter pelo menos 1 ficha na conta. Use 'Excluir ficha' para zerá-la.", "warning");
+    return;
+  }
+
+  const currentId = state.accountSlots.activeSlotId;
+  delete state.accountSlots.slots[currentId];
+
+  const remainingKeys = Object.keys(state.accountSlots.slots);
+  const fallbackId = remainingKeys[0];
+  state.accountSlots.activeSlotId = fallbackId;
+
+  resetSheetFieldsToDefault();
+  applySheetData({ fields: state.accountSlots.slots[fallbackId].fields || createSafeRecord() }, true);
+  syncSlotDropdownUI();
+  setStatusBanner("Ficha removida da lista da conta.", "success");
+  await persistSheet(true);
 }
 
 /* --------------------------------------------------------------------------
@@ -529,8 +1129,7 @@ function ensurePlayerNoticeBannerElement() {
 }
 
 /* --------------------------------------------------------------------------
-   Helpers Exclusivos da Conta Admin: Prompt, Funções Abaixo do Comando e
-   Área de Todos os Comandos Ativos
+   Helpers Exclusivos da Conta Admin
    -------------------------------------------------------------------------- */
 function isCurrentUserAdmin() {
   return Boolean(state.user && typeof state.user.uid === "string" && state.user.uid === ADMIN_UID);
@@ -582,7 +1181,7 @@ function computeSheetDiffList() {
 
   for (let i = 0; i < allKeys.length; i += 1) {
     const key = allKeys[i];
-    if (!isValidFieldKey(key) || key === ADMIN_NOTICE_FIELD_KEY) continue;
+    if (!isValidFieldKey(key) || key === ADMIN_NOTICE_FIELD_KEY || key === MULTI_SLOTS_FIELD_KEY) continue;
     const oldVal = Object.prototype.hasOwnProperty.call(baseline, key) ? baseline[key] : "";
     const newVal = Object.prototype.hasOwnProperty.call(current, key) ? current[key] : "";
     if (String(oldVal) !== String(newVal)) {
@@ -601,7 +1200,7 @@ function saveAdminTargetUidToStorage(uid) {
       sessionStorage.removeItem(STORAGE_KEYS.ADMIN_TARGET_UID);
     }
   } catch {
-    // Ignora falha de armazenamento
+    // Ignora falha
   }
 }
 
@@ -622,7 +1221,7 @@ function recordRecentAdminUid(uid) {
   try {
     sessionStorage.setItem(STORAGE_KEYS.ADMIN_RECENT_UIDS, JSON.stringify(next));
   } catch {
-    // Ignora falha de armazenamento
+    // Ignora falha
   }
   if (state.adminActiveCommand === "/uid" || state.adminActiveCommand === "/minha") {
     renderAdminCommandFunctionsBelow();
@@ -1408,7 +2007,7 @@ function handleAdminExportJson() {
     a.remove();
     URL.revokeObjectURL(url);
   } catch {
-    // Fallback: JSON exibido na caixa abaixo do comando
+    // Fallback
   }
 
   appendAdminLog(`JSON exportado do UID ${getActiveTargetUid()}`);
@@ -1684,7 +2283,7 @@ async function handleAdminClearNotice(event) {
 }
 
 /* --------------------------------------------------------------------------
-   Cálculo Automático da Tabela de Perícias (#tabela-pericias)
+   Cálculo Automático da Tabela de Perícias (#tabela-pericias) + Sobrecarga
    -------------------------------------------------------------------------- */
 function getSkillAttributeBonus(attrText) {
   const normalized = sanitizeSingleLine(attrText || "", 24)
@@ -1720,11 +2319,15 @@ function getSkillGradeBonus(selectEl) {
 }
 
 function recalculateSkillsTable() {
+  recalculateAutoStatusValues();
+  const isOverloaded = evaluateOverloadState();
+
   const table = document.getElementById("tabela-pericias");
   if (!table) return;
 
   const rows = table.querySelectorAll("tbody tr");
   rows.forEach((row) => {
+    const nameCell = row.querySelector(".pericia-nome");
     const attrCell = row.querySelector(".attr-tag");
     const gradeSelect = row.querySelector("select");
     const numberInputs = Array.from(row.querySelectorAll('input[type="number"]'));
@@ -1741,8 +2344,11 @@ function recalculateSkillsTable() {
       }
     }
 
+    const hasCargoPenaltyTag = Boolean(nameCell && (nameCell.textContent || "").includes("*"));
+    const overloadPenalty = isOverloaded && hasCargoPenaltyTag ? OVERLOAD_SKILL_PENALTY : 0;
+
     const attrBonus = getSkillAttributeBonus(attrCell ? attrCell.textContent : "");
-    const total = attrBonus + extrasSum;
+    const total = attrBonus + extrasSum + overloadPenalty;
 
     if (totalInput) {
       totalInput.value = String(total);
@@ -1791,6 +2397,7 @@ function applyNenCategoryTheme(rawValue) {
   }
 
   highlightNenCategoryRow(key);
+  updateNenHexagonDiagram(key);
 }
 
 function syncNenCategoryFromSelect() {
@@ -1851,7 +2458,7 @@ function aceitarLgpdBanner() {
   try {
     localStorage.setItem(STORAGE_KEYS.COOKIE_CONSENT, "accepted");
   } catch {
-    // Mantém o aceite em memória caso o localStorage esteja bloqueado
+    // Mantém o aceite em memória
   }
   setLgpdBannerVisibility(true);
   if (!state.offlineMode) {
@@ -2000,6 +2607,7 @@ function computeFieldsSnapshot(fieldsObj) {
 
 function collectSheetData() {
   recalculateSkillsTable();
+  syncAbilitiesToHiddenInput();
 
   const fields = createSafeRecord();
   const mainEl = document.querySelector("main.container");
@@ -2010,6 +2618,17 @@ function collectSheetData() {
   const controls = mainEl.querySelectorAll("input, select, textarea");
   controls.forEach((ctrl, index) => {
     if (!ctrl || ctrl.closest("#login-firebase")) return;
+    if (
+      ctrl.id === "hab-nome-input" ||
+      ctrl.id === "hab-tipo-input" ||
+      ctrl.id === "hab-custo-input" ||
+      ctrl.id === "hab-desc-input" ||
+      ctrl.id === "guilda-gasto-valor" ||
+      ctrl.id === "guilda-gasto-motivo"
+    ) {
+      return;
+    }
+
     const key = buildFieldKey(ctrl, index);
     if (!isValidFieldKey(key)) return;
 
@@ -2023,6 +2642,30 @@ function collectSheetData() {
       fields[key] = normalized;
     }
   });
+
+  if (state.user && !state.offlineMode) {
+    const activeId = state.accountSlots.activeSlotId || "slot-1";
+    const slotFields = createSafeRecord();
+    Object.entries(fields).forEach(([k, v]) => {
+      if (k !== ADMIN_NOTICE_FIELD_KEY && k !== MULTI_SLOTS_FIELD_KEY) {
+        slotFields[k] = v;
+      }
+    });
+    const agentName = sanitizeSingleLine(slotFields["id:nome"] || "", 45) || "Agente Principal";
+    state.accountSlots.slots[activeId] = {
+      name: agentName,
+      fields: slotFields
+    };
+    syncSlotDropdownUI();
+
+    const serializedRegistry = JSON.stringify({
+      activeSlotId: activeId,
+      slots: state.accountSlots.slots
+    });
+    if (serializedRegistry.length <= 280000) {
+      fields[MULTI_SLOTS_FIELD_KEY] = serializedRegistry;
+    }
+  }
 
   if (state.activeNotice && Date.now() < (state.activeNotice.expiresAt || 0)) {
     const remainingMinutes = Math.max(
@@ -2055,6 +2698,13 @@ function buildSanitizedCloudPayload() {
       const [key, val] = entries[i];
       if (!isValidFieldKey(key)) continue;
 
+      if (key === MULTI_SLOTS_FIELD_KEY && typeof val === "string") {
+        if (val.length <= 280000) {
+          cleanFields[key] = val;
+        }
+        continue;
+      }
+
       if (key === ADMIN_NOTICE_FIELD_KEY && typeof val === "string") {
         const parsedNotice = parseActiveNoticeFromFields({ [ADMIN_NOTICE_FIELD_KEY]: val });
         if (parsedNotice) {
@@ -2076,11 +2726,13 @@ function buildSanitizedCloudPayload() {
         cleanFields[key] = String(Math.trunc(val)).slice(0, 24);
       } else if (typeof val === "string") {
         cleanFields[key] =
-          key.startsWith("id:anotacoes") ||
-          key.startsWith("id:hist-") ||
-          key.startsWith("id:proficiencias")
-            ? sanitizeText(val, 5000)
-            : sanitizeSingleLine(val, 250);
+          key === "id:habilidades-nen-json"
+            ? sanitizeText(val, 15000)
+            : key.startsWith("id:anotacoes") ||
+              key.startsWith("id:hist-") ||
+              key.startsWith("id:proficiencias")
+              ? sanitizeText(val, 5000)
+              : sanitizeSingleLine(val, 250);
       }
     }
   }
@@ -2091,9 +2743,80 @@ function buildSanitizedCloudPayload() {
   };
 }
 
-function applySheetData(data) {
+function hydrateAccountSlotsFromFields(fieldsObj) {
+  const defaultSlotFields = createSafeRecord();
+  Object.entries(fieldsObj || {}).forEach(([k, v]) => {
+    if (isValidFieldKey(k) && k !== ADMIN_NOTICE_FIELD_KEY && k !== MULTI_SLOTS_FIELD_KEY) {
+      defaultSlotFields[k] = v;
+    }
+  });
+  const defaultName = sanitizeSingleLine(defaultSlotFields["id:nome"] || "", 45) || "Agente Principal";
+
+  if (!fieldsObj || !Object.prototype.hasOwnProperty.call(fieldsObj, MULTI_SLOTS_FIELD_KEY)) {
+    state.accountSlots = {
+      activeSlotId: "slot-1",
+      slots: {
+        "slot-1": { name: defaultName, fields: defaultSlotFields }
+      }
+    };
+    syncSlotDropdownUI();
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(String(fieldsObj[MULTI_SLOTS_FIELD_KEY] || ""));
+    if (!parsed || typeof parsed !== "object" || !parsed.slots || typeof parsed.slots !== "object") {
+      throw new Error("Invalid slots");
+    }
+
+    const safeSlots = createSafeRecord();
+    Object.entries(parsed.slots).slice(0, MAX_ACCOUNT_SLOTS).forEach(([slotId, slotVal], idx) => {
+      if (isForbiddenKey(slotId) || !/^[a-zA-Z0-9_-]{1,40}$/.test(slotId)) return;
+      if (!slotVal || typeof slotVal !== "object" || !slotVal.fields || typeof slotVal.fields !== "object") return;
+
+      const cleanSlotFields = createSafeRecord();
+      Object.entries(slotVal.fields).slice(0, 1500).forEach(([fk, fv]) => {
+        if (!isValidFieldKey(fk) || fk === ADMIN_NOTICE_FIELD_KEY || fk === MULTI_SLOTS_FIELD_KEY) return;
+        if (typeof fv === "boolean") cleanSlotFields[fk] = fv;
+        else if (typeof fv === "string" || typeof fv === "number") cleanSlotFields[fk] = String(fv).slice(0, 15000);
+      });
+
+      const slotName =
+        sanitizeSingleLine(String(slotVal.name || cleanSlotFields["id:nome"] || `Agente ${idx + 1}`), 45) ||
+        `Agente ${idx + 1}`;
+      safeSlots[slotId] = { name: slotName, fields: cleanSlotFields };
+    });
+
+    const slotKeys = Object.keys(safeSlots);
+    if (!slotKeys.length) {
+      throw new Error("Empty slots");
+    }
+
+    const activeId = slotKeys.includes(parsed.activeSlotId) ? parsed.activeSlotId : slotKeys[0];
+    state.accountSlots = {
+      activeSlotId: activeId,
+      slots: safeSlots
+    };
+    syncSlotDropdownUI();
+    return safeSlots[activeId].fields;
+  } catch {
+    state.accountSlots = {
+      activeSlotId: "slot-1",
+      slots: {
+        "slot-1": { name: defaultName, fields: defaultSlotFields }
+      }
+    };
+    syncSlotDropdownUI();
+    return null;
+  }
+}
+
+function applySheetData(data, skipSlotHydration = false) {
   if (!data || typeof data !== "object" || !data.fields || typeof data.fields !== "object") {
     state.activeNotice = null;
+    state.nenAbilities = [];
+    syncAbilitiesToHiddenInput();
+    renderNenAbilitiesList();
     scheduleNoticeExpiryCheck();
     renderPlayerNoticeBanner();
     recalculateSkillsTable();
@@ -2102,6 +2825,14 @@ function applySheetData(data) {
     captureBaselineFields(collectSheetData().fields);
     renderAdminCommandFunctionsBelow();
     return;
+  }
+
+  let effectiveFields = data.fields;
+  if (!skipSlotHydration) {
+    const slotFields = hydrateAccountSlotsFromFields(data.fields);
+    if (slotFields) {
+      effectiveFields = slotFields;
+    }
   }
 
   state.activeNotice = parseActiveNoticeFromFields(data.fields);
@@ -2116,15 +2847,18 @@ function applySheetData(data) {
     if (!ctrl || ctrl.closest("#login-firebase")) return;
     const key = buildFieldKey(ctrl, index);
     if (!isValidFieldKey(key)) return;
-    if (!Object.prototype.hasOwnProperty.call(data.fields, key)) return;
+    if (!Object.prototype.hasOwnProperty.call(effectiveFields, key)) return;
 
-    const savedVal = data.fields[key];
+    const savedVal = effectiveFields[key];
     if (ctrl.type === "checkbox") {
       ctrl.checked = Boolean(savedVal);
     } else if (typeof savedVal === "string" || typeof savedVal === "number") {
       ctrl.value = normalizeControlValue(ctrl, String(savedVal));
     }
   });
+
+  parseAbilitiesFromHiddenInput();
+  renderNenAbilitiesList();
 
   recalculateSkillsTable();
   const normalizedFields = collectSheetData().fields;
@@ -2164,16 +2898,24 @@ function resetSheetFieldsToDefault() {
         ctrl.value = "1";
       } else if (ctrl.id === "espacos-max") {
         ctrl.value = "5";
+      } else if (ctrl.id === "hab-custo-input") {
+        ctrl.value = "2";
+      } else if (ctrl.id === "guilda-gasto-valor") {
+        ctrl.value = "10";
       } else {
         ctrl.value = "0";
       }
     } else if (ctrl.id === "rank-val") {
       ctrl.value = "E";
+    } else if (ctrl.id === "habilidades-nen-json") {
+      ctrl.value = "[]";
     } else {
       ctrl.value = "";
     }
   });
 
+  state.nenAbilities = [];
+  renderNenAbilitiesList();
   recalculateSkillsTable();
   state.lastSavedSnapshot = "";
   captureBaselineFields(collectSheetData().fields);
@@ -2211,7 +2953,7 @@ function clearLocalData() {
   try {
     localStorage.removeItem(STORAGE_KEYS.LOCAL_SHEET);
   } catch {
-    // Ignora falha de armazenamento
+    // Ignora falha
   }
 }
 
@@ -2347,598 +3089,21 @@ async function initFirebase() {
         if (!state.isDeleting) {
           const targetUid = getActiveTargetUid();
           const isRemoteTarget = user.uid === ADMIN_UID && targetUid && targetUid !== user.uid;
-          setStatusBanner(
-            isRemoteTarget
-              ? `Admin conectado. Carregando ficha do UID ${targetUid}...`
-              : `Conectado como ${sanitizeSingleLine(user.email || "agente", 160)}. Carregando ficha...`,
-            "info"
-          );
-          await loadFromFirestore(targetUid || user.uid);
+          if (typeof loadFromFirestore === "function") {
+            await loadFromFirestore(targetUid || user.uid);
+          } else {
+            const localFallback = loadLocalData();
+            if (localFallback && !isRemoteTarget) {
+              applySheetData(localFallback);
+            }
+          }
         }
-      } else if (!state.isDeleting && !state.offlineMode) {
-        setStatusBanner("Faça login para salvar e carregar sua ficha no Firebase.", "info");
+      } else if (!state.offlineMode) {
+        resetSheetFieldsToDefault();
       }
     });
-  } catch {
-    setEntradaStatus(
-      "Falha ao carregar recursos no GitHub Pages ou conectar ao Firebase. Você pode entrar offline/local."
-    );
-  }
-}
-
-async function loadFromFirestore(uid) {
-  if (!state.firebaseReady || !state.db || !uid) return;
-  const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
-
-  try {
-    const docRef = doc(state.db, FIRESTORE_COLLECTION, uid);
-    const snap = await getDoc(docRef);
-
-    if (snap.exists()) {
-      const cloudData = snap.data();
-      applySheetData(cloudData);
-      if (!isCurrentUserAdmin() || uid === state.user?.uid) {
-        saveLocalData(cloudData);
-      }
-      setStatusBanner(
-        isCurrentUserAdmin() && uid !== state.user?.uid
-          ? `Ficha carregada do UID alvo (${uid}).`
-          : "Ficha carregada do banco de dados Firebase.",
-        "success"
-      );
-    } else {
-      state.activeNotice = null;
-      scheduleNoticeExpiryCheck();
-      renderPlayerNoticeBanner();
-      resetSheetFieldsToDefault();
-      const initialData = buildSanitizedCloudPayload();
-      await setDoc(docRef, initialData);
-      captureBaselineFields(initialData.fields);
-      state.lastSavedSnapshot = computeFieldsSnapshot(initialData.fields);
-      state.lastCloudWriteAt = Date.now();
-      if (!isCurrentUserAdmin() || uid === state.user?.uid) {
-        saveLocalData(initialData);
-      }
-      renderAdminCommandFunctionsBelow();
-      setStatusBanner(
-        isCurrentUserAdmin() && uid !== state.user?.uid
-          ? `Nova ficha criada para o UID alvo (${uid}).`
-          : "Nova ficha criada na sua conta do Firebase.",
-        "success"
-      );
-    }
   } catch (err) {
-    const code = err && typeof err.code === "string" ? err.code : "";
-    if (code === "permission-denied") {
-      setStatusBanner("Permissão negada no Firestore ao ler este UID.", "error");
-    } else {
-      setStatusBanner("Erro ao ler dados do Firebase. Verifique as regras do Firestore.", "error");
-    }
+    state.firebaseReady = false;
+    setEntradaStatus(formatDatabaseOrHostingError(err));
   }
 }
-
-async function saveToFirestore(uid, data) {
-  if (!state.firebaseReady || !state.db || !uid || typeof uid !== "string") {
-    return false;
-  }
-  const { doc, setDoc } = state.firebaseModules.firestoreMod;
-  const docRef = doc(state.db, FIRESTORE_COLLECTION, uid);
-  const safeData = data && data.fields ? data : buildSanitizedCloudPayload();
-  await setDoc(docRef, safeData, { merge: true });
-  state.lastCloudWriteAt = Date.now();
-  return true;
-}
-
-async function handleClearSheetData(event) {
-  if (event && event.isTrusted === false) return;
-  if (state.isSaving || state.isDeleting) return;
-  if (isInspectionReadOnlyActive()) {
-    setStatusBanner("Desative 'Somente leitura' para limpar ou excluir fichas.", "warning");
-    return;
-  }
-
-  if (state.saveTimer) {
-    clearTimeout(state.saveTimer);
-    state.saveTimer = null;
-  }
-
-  const targetUid = getActiveTargetUid();
-  const isRemoteTarget = Boolean(isCurrentUserAdmin() && targetUid && targetUid !== state.user?.uid);
-
-  state.activeNotice = null;
-  scheduleNoticeExpiryCheck();
-  renderPlayerNoticeBanner();
-  resetSheetFieldsToDefault();
-  if (!isRemoteTarget) {
-    clearLocalData();
-  }
-
-  const clearConfirmBox = document.getElementById("sheet-clear-confirm-box");
-  if (clearConfirmBox) clearConfirmBox.hidden = true;
-
-  if (state.firebaseReady && state.db && targetUid) {
-    const { doc, deleteDoc } = state.firebaseModules.firestoreMod;
-    try {
-      await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, targetUid));
-      appendAdminLog(`Ficha excluída da nuvem para UID ${targetUid}`);
-      setStatusBanner(
-        isRemoteTarget
-          ? `Ficha do UID ${targetUid} excluída da nuvem.`
-          : "Ficha excluída da nuvem e do navegador.",
-        "success"
-      );
-      return;
-    } catch {
-      setStatusBanner("Ficha limpa na tela, mas houve erro ao apagar na nuvem.", "error");
-      return;
-    }
-  }
-
-  setStatusBanner("Ficha limpa.", "warning");
-}
-
-async function handleAuthSubmit(event) {
-  event.preventDefault();
-  if (event && event.isTrusted === false) return;
-  if (!state.firebaseReady || !state.auth) {
-    setEntradaStatus("Firebase ainda não foi inicializado ou houve falha no carregamento do GitHub Pages.");
-    return;
-  }
-
-  const emailEl = document.getElementById("auth-email");
-  const passEl = document.getElementById("auth-password");
-  const email = sanitizeSingleLine(emailEl ? emailEl.value : "", 160);
-  const password = passEl ? passEl.value : "";
-
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 6) {
-    setEntradaStatus("Preencha um e-mail válido e uma senha com pelo menos 6 caracteres.");
-    return;
-  }
-
-  const { signInWithEmailAndPassword, createUserWithEmailAndPassword } = state.firebaseModules.authMod;
-
-  try {
-    setEntradaStatus(state.authMode === "register" ? "Criando conta..." : "Entrando...");
-    await checkEnvironmentAndFirestoreBeforeLogin();
-    if (state.authMode === "register") {
-      await createUserWithEmailAndPassword(state.auth, email, password);
-    } else {
-      await signInWithEmailAndPassword(state.auth, email, password);
-    }
-    clearAuthSensitiveInputs();
-  } catch (err) {
-    const code = err && typeof err.code === "string" ? err.code : "";
-    if (
-      navigator.onLine === false ||
-      code === "offline-browser" ||
-      code === "unavailable" ||
-      code === "deadline-exceeded" ||
-      code === "failed-precondition" ||
-      code === "permission-denied" ||
-      code === "auth/network-request-failed"
-    ) {
-      setEntradaStatus(formatDatabaseOrHostingError(err));
-    } else {
-      setEntradaStatus(mapFirebaseAuthError(err));
-    }
-  }
-}
-
-async function handleLogout(event) {
-  if (event && event.isTrusted === false) return;
-  state.offlineMode = false;
-  state.adminTargetUid = "";
-  state.adminDraftUid = "";
-  state.adminRecentUids = [];
-  state.adminReadOnly = false;
-  state.adminActiveCommand = "";
-  state.adminAllCommandsActive = false;
-  state.activeNotice = null;
-  scheduleNoticeExpiryCheck();
-  saveAdminTargetUidToStorage("");
-  state.lastSavedSnapshot = "";
-  clearAuthSensitiveInputs();
-
-  if (state.firebaseReady && state.auth && state.user) {
-    try {
-      const { signOut } = state.firebaseModules.authMod;
-      await signOut(state.auth);
-    } catch {
-      setStatusBanner("Erro ao encerrar a sessão.", "error");
-      return;
-    }
-  }
-  updateAuthUI();
-  updateScreenAccess();
-  setEntradaStatus("Você saiu da sessão. Escolha como deseja entrar novamente.");
-}
-
-async function handleDeleteAccount(event) {
-  if (event && event.isTrusted === false) return;
-  if (!state.firebaseReady || !state.auth || !state.auth.currentUser || state.isDeleting) {
-    return;
-  }
-
-  const currentUser = state.auth.currentUser;
-  const uid = currentUser.uid;
-  const { deleteUser } = state.firebaseModules.authMod;
-  const { doc, deleteDoc } = state.firebaseModules.firestoreMod;
-
-  state.isDeleting = true;
-  setStatusBanner("Excluindo conta e dados salvos...", "info");
-
-  try {
-    if (state.db && uid) {
-      await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, uid));
-    }
-
-    await deleteUser(currentUser);
-    clearLocalData();
-    clearAuthSensitiveInputs();
-    state.offlineMode = false;
-    state.adminTargetUid = "";
-    state.adminDraftUid = "";
-    state.adminRecentUids = [];
-    state.adminReadOnly = false;
-    state.adminActiveCommand = "";
-    state.adminAllCommandsActive = false;
-    state.activeNotice = null;
-    scheduleNoticeExpiryCheck();
-    saveAdminTargetUidToStorage("");
-    state.lastSavedSnapshot = "";
-
-    const confirmBox = document.getElementById("auth-delete-confirm-box");
-    if (confirmBox) confirmBox.hidden = true;
-
-    updateAuthUI();
-    updateScreenAccess();
-    setEntradaStatus("Conta e ficha excluídas permanentemente do Firebase.");
-  } catch (err) {
-    if (err && err.code === "auth/requires-recent-login") {
-      setStatusBanner("Por segurança, saia e entre novamente antes de excluir a conta.", "warning");
-    } else {
-      setStatusBanner("Não foi possível excluir a conta. Verifique as regras do Firestore e tente novamente.", "error");
-    }
-  } finally {
-    state.isDeleting = false;
-  }
-}
-
-/* --------------------------------------------------------------------------
-   Salvamento da Ficha (com proteção contra gravação redundante, inspeção e spam)
-   -------------------------------------------------------------------------- */
-async function persistSheet(forceWrite = false) {
-  if (state.isSaving || state.isDeleting) return;
-  if (!forceWrite && isInspectionReadOnlyActive()) {
-    return;
-  }
-  state.isSaving = true;
-
-  try {
-    const payload = collectSheetData();
-    const currentSnapshot = computeFieldsSnapshot(payload.fields);
-
-    if (state.offlineMode && !state.user) {
-      setStatusBanner(
-        "Modo offline/local: alterações não ficam salvas se você carregar a página novamente.",
-        "warning"
-      );
-      return;
-    }
-
-    if (!forceWrite && currentSnapshot === state.lastSavedSnapshot) {
-      return;
-    }
-
-    const targetUid = getActiveTargetUid();
-    const isRemoteTarget = Boolean(isCurrentUserAdmin() && targetUid && targetUid !== state.user?.uid);
-
-    if (!isRemoteTarget) {
-      saveLocalData(payload);
-    }
-
-    if (state.firebaseReady && state.user && targetUid) {
-      const elapsed = Date.now() - state.lastCloudWriteAt;
-      if (!forceWrite && elapsed < MIN_CLOUD_SAVE_INTERVAL_MS) {
-        scheduleAutoSave();
-        return;
-      }
-
-      const cloudPayload = buildSanitizedCloudPayload();
-      await saveToFirestore(targetUid, cloudPayload);
-      captureBaselineFields(cloudPayload.fields);
-      state.lastSavedSnapshot = computeFieldsSnapshot(cloudPayload.fields);
-      syncAdminQuickInputsFromSheet();
-      setStatusBanner(
-        isRemoteTarget
-          ? `Ficha salva no Firestore para o UID ${targetUid}.`
-          : "Ficha salva no banco de dados Firebase.",
-        "success"
-      );
-    } else if (hasCookieConsent()) {
-      captureBaselineFields(payload.fields);
-      state.lastSavedSnapshot = currentSnapshot;
-      setStatusBanner("Alterações salvas localmente.", "info");
-    } else {
-      setStatusBanner("Aceite o banner LGPD para salvar localmente ou faça login no Firebase.", "info");
-    }
-  } catch (err) {
-    const code = err && typeof err.code === "string" ? err.code : "";
-    if (code === "permission-denied") {
-      setStatusBanner("Permissão negada no Firestore ao salvar a ficha.", "error");
-    } else {
-      setStatusBanner("Erro ao salvar no Firebase. Confira as permissões do Firestore.", "error");
-    }
-  } finally {
-    state.isSaving = false;
-  }
-}
-
-function scheduleAutoSave() {
-  if (isInspectionReadOnlyActive()) return;
-  if (state.saveTimer) clearTimeout(state.saveTimer);
-  state.saveTimer = setTimeout(() => {
-    persistSheet(false);
-  }, 750);
-}
-
-/* --------------------------------------------------------------------------
-   Interface e Eventos
-   -------------------------------------------------------------------------- */
-function updatePasswordVisibilityUI() {
-  const passEl = document.getElementById("auth-password");
-  const togglePassBtn = document.getElementById("auth-toggle-password");
-  const visible = Boolean(state.showPassword);
-
-  if (passEl) {
-    passEl.type = visible ? "text" : "password";
-  }
-
-  if (togglePassBtn) {
-    togglePassBtn.setAttribute("aria-pressed", visible ? "true" : "false");
-    togglePassBtn.setAttribute(
-      "aria-label",
-      visible ? "Ocultar senha enquanto digita" : "Mostrar senha enquanto digita"
-    );
-    togglePassBtn.textContent = visible ? "Ocultar" : "Mostrar";
-  }
-}
-
-function updateAuthUI() {
-  const loggedInBox = document.getElementById("auth-logged-in");
-  const offlineBox = document.getElementById("offline-session-box");
-  const userEmailEl = document.getElementById("auth-user-email");
-  const submitBtn = document.getElementById("auth-submit-btn");
-  const toggleBtn = document.getElementById("auth-toggle-mode");
-  const confirmBox = document.getElementById("auth-delete-confirm-box");
-  const clearConfirmBox = document.getElementById("sheet-clear-confirm-box");
-
-  if (confirmBox) confirmBox.hidden = true;
-  if (clearConfirmBox) clearConfirmBox.hidden = true;
-
-  renderSafeText(
-    submitBtn,
-    state.authMode === "register" ? "Cadastrar" : "Entrar",
-    40
-  );
-  renderSafeText(
-    toggleBtn,
-    state.authMode === "register" ? "Já tenho conta (Entrar)" : "Criar nova conta",
-    60
-  );
-
-  if (state.user) {
-    if (loggedInBox) loggedInBox.hidden = false;
-    if (offlineBox) offlineBox.hidden = true;
-    state.showPassword = false;
-    updatePasswordVisibilityUI();
-    renderSafeText(userEmailEl, state.user.email || "Conta ativa", 160);
-  } else if (state.offlineMode) {
-    if (loggedInBox) loggedInBox.hidden = true;
-    if (offlineBox) offlineBox.hidden = false;
-    updatePasswordVisibilityUI();
-  } else {
-    if (loggedInBox) loggedInBox.hidden = true;
-    if (offlineBox) offlineBox.hidden = true;
-    updatePasswordVisibilityUI();
-  }
-
-  updateAdminBarUI();
-  renderPlayerNoticeBanner();
-}
-
-function initLgpdBanner() {
-  setLgpdBannerVisibility(hasCookieConsent());
-
-  const acceptBtn = document.getElementById("lgpd-accept-btn");
-  if (!acceptBtn || acceptBtn.dataset.lgpdBound === "1") return;
-  acceptBtn.dataset.lgpdBound = "1";
-
-  acceptBtn.addEventListener("click", aceitarLgpdBanner);
-}
-
-function bindEvents() {
-  window.addEventListener("scroll", scheduleScrollSectionSync, { passive: true });
-  window.addEventListener("resize", scheduleScrollSectionSync, { passive: true });
-
-  const rodapeDetalhesBtn = document.getElementById("btn-rodape-detalhes");
-  const rodapePainelLgpd = document.getElementById("rodape-painel-lgpd");
-  const rodapeEl = document.getElementById("rodape-criador");
-
-  if (rodapeDetalhesBtn && rodapePainelLgpd) {
-    rodapeDetalhesBtn.addEventListener("click", () => {
-      const seraOcultado = !rodapePainelLgpd.hidden;
-      rodapePainelLgpd.hidden = seraOcultado;
-      rodapeDetalhesBtn.setAttribute("aria-expanded", seraOcultado ? "false" : "true");
-      if (rodapeEl) {
-        rodapeEl.classList.toggle("rodape-destacado", !seraOcultado);
-      }
-    });
-  }
-
-  const nenSelect = document.getElementById("categoria-principal-nen");
-  if (nenSelect) {
-    nenSelect.addEventListener("change", (event) => {
-      const target = event.target;
-      const selectedOptionText =
-        target && target.options && target.selectedIndex >= 0
-          ? target.options[target.selectedIndex].textContent || ""
-          : "";
-      applyNenCategoryTheme((target && target.value) || selectedOptionText);
-    });
-  }
-
-  const navLinks = document.querySelectorAll(".abas .aba-btn[data-secao-alvo]");
-  navLinks.forEach((link) => {
-    link.addEventListener("click", () => {
-      const targetId = link.dataset.secaoAlvo;
-      if (targetId) {
-        setActiveSectionIndicator(targetId);
-      }
-      window.setTimeout(syncActiveSectionOnScroll, 320);
-    });
-  });
-
-  const offlineBtn = document.getElementById("btn-entrar-offline");
-  if (offlineBtn) {
-    offlineBtn.addEventListener("click", enterOfflineTemporaryMode);
-  }
-
-  const voltarEntradaBtn = document.getElementById("btn-voltar-entrada");
-  if (voltarEntradaBtn) {
-    voltarEntradaBtn.addEventListener("click", handleLogout);
-  }
-
-  const irLoginNuvemBtn = document.getElementById("btn-ir-login-nuvem");
-  if (irLoginNuvemBtn) {
-    irLoginNuvemBtn.addEventListener("click", () => {
-      state.offlineMode = false;
-      clearAuthSensitiveInputs();
-      updateAuthUI();
-      updateScreenAccess();
-      setEntradaStatus("Entre com sua conta Firebase para salvar na nuvem.");
-    });
-  }
-
-  const togglePassBtn = document.getElementById("auth-toggle-password");
-  if (togglePassBtn) {
-    togglePassBtn.addEventListener("click", () => {
-      state.showPassword = !state.showPassword;
-      updatePasswordVisibilityUI();
-      const passEl = document.getElementById("auth-password");
-      if (passEl) passEl.focus();
-    });
-  }
-
-  const authForm = document.getElementById("auth-form");
-  if (authForm) {
-    authForm.addEventListener("submit", handleAuthSubmit);
-  }
-
-  const toggleBtn = document.getElementById("auth-toggle-mode");
-  if (toggleBtn) {
-    toggleBtn.addEventListener("click", () => {
-      state.authMode = state.authMode === "login" ? "register" : "login";
-      updateAuthUI();
-    });
-  }
-
-  const logoutBtn = document.getElementById("auth-logout-btn");
-  if (logoutBtn) {
-    logoutBtn.addEventListener("click", handleLogout);
-  }
-
-  const clearOpenBtn = document.getElementById("sheet-clear-open-btn");
-  const clearConfirmBox = document.getElementById("sheet-clear-confirm-box");
-  const clearConfirmBtn = document.getElementById("sheet-clear-confirm-btn");
-  const clearCancelBtn = document.getElementById("sheet-clear-cancel-btn");
-  const clearOfflineBtn = document.getElementById("sheet-clear-offline-btn");
-
-  const deleteOpenBtn = document.getElementById("auth-delete-open-btn");
-  const deleteConfirmBox = document.getElementById("auth-delete-confirm-box");
-  const deleteConfirmBtn = document.getElementById("auth-delete-confirm-btn");
-  const deleteCancelBtn = document.getElementById("auth-delete-cancel-btn");
-
-  if (clearOpenBtn && clearConfirmBox) {
-    clearOpenBtn.addEventListener("click", () => {
-      if (deleteConfirmBox) deleteConfirmBox.hidden = true;
-      clearConfirmBox.hidden = !clearConfirmBox.hidden;
-    });
-  }
-
-  if (clearCancelBtn && clearConfirmBox) {
-    clearCancelBtn.addEventListener("click", () => {
-      clearConfirmBox.hidden = true;
-    });
-  }
-
-  if (clearConfirmBtn) {
-    clearConfirmBtn.addEventListener("click", handleClearSheetData);
-  }
-
-  if (clearOfflineBtn) {
-    clearOfflineBtn.addEventListener("click", handleClearSheetData);
-  }
-
-  if (deleteOpenBtn && deleteConfirmBox) {
-    deleteOpenBtn.addEventListener("click", () => {
-      if (clearConfirmBox) clearConfirmBox.hidden = true;
-      deleteConfirmBox.hidden = !deleteConfirmBox.hidden;
-    });
-  }
-
-  if (deleteCancelBtn && deleteConfirmBox) {
-    deleteConfirmBox.addEventListener("click", () => {
-      deleteConfirmBox.hidden = true;
-    });
-  }
-
-  if (deleteConfirmBtn) {
-    deleteConfirmBtn.addEventListener("click", handleDeleteAccount);
-  }
-
-  const saveBtn = document.getElementById("btn-save-sheet");
-  if (saveBtn) {
-    saveBtn.addEventListener("click", () => persistSheet(true));
-  }
-
-  const syncBtn = document.getElementById("auth-sync-btn");
-  if (syncBtn) {
-    syncBtn.addEventListener("click", () => persistSheet(true));
-  }
-
-  const mainEl = document.querySelector("main.container");
-  if (mainEl) {
-    const handleFieldUpdate = (event) => {
-      if (event.target && event.target.closest("#login-firebase")) return;
-      if (isInspectionReadOnlyActive()) return;
-      recalculateSkillsTable();
-      syncAdminQuickInputsFromSheet();
-      scheduleAutoSave();
-    };
-    mainEl.addEventListener("input", handleFieldUpdate);
-    mainEl.addEventListener("change", handleFieldUpdate);
-  }
-}
-
-document.addEventListener("DOMContentLoaded", () => {
-  initConsoleSecurityGuard();
-  hardenExternalLinks();
-  initLgpdBanner();
-
-  const localData = loadLocalData();
-  if (localData) {
-    applySheetData(localData);
-  } else {
-    recalculateSkillsTable();
-    syncNenCategoryFromSelect();
-    syncAdminQuickInputsFromSheet();
-    captureBaselineFields(collectSheetData().fields);
-  }
-
-  setActiveSectionIndicator("dados-agente");
-  updateAuthUI();
-  updateScreenAccess();
-  bindEvents();
-  initFirebase();
-});
