@@ -169,7 +169,13 @@ html[data-nen-categoria] .tabela-nen tbody tr.nen-linha-ativa td {
   font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
+html {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body {
+  max-width: 100%;
   background:
     radial-gradient(circle at 15% 0%, rgba(23, 130, 158, 0.24), transparent 45%),
     radial-gradient(circle at 86% 10%, rgba(31, 111, 88, 0.24), transparent 46%),
@@ -282,7 +288,7 @@ body {
 
 .entrada-opcoes {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 18px;
 }
 
@@ -340,7 +346,7 @@ body {
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--borda-oceano);
-  padding: 14px 20px;
+  padding: 12px 16px;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -348,7 +354,7 @@ body {
   flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
 }
 
@@ -356,15 +362,16 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-width: 0;
 }
 
 .topo h1 {
-  font-size: 1.52rem;
+  font-size: clamp(1.15rem, 3.8vw, 1.52rem);
   font-weight: 900;
   color: #ffffff;
   text-transform: uppercase;
-  letter-spacing: 2px;
+  letter-spacing: 1.6px;
   text-shadow: 0 2px 12px rgba(23, 130, 158, 0.45);
 }
 
@@ -375,9 +382,10 @@ body {
   background: linear-gradient(135deg, rgba(31, 111, 88, 0.26) 0%, rgba(13, 92, 117, 0.28) 100%);
   border: 1px solid var(--borda-ilha);
   border-radius: 999px;
-  padding: 5px 13px;
-  font-size: 0.8rem;
+  padding: 4px 12px;
+  font-size: clamp(0.74rem, 2.2vw, 0.8rem);
   color: var(--texto-suave);
+  max-width: 100%;
 }
 
 .secao-ativa-indicador strong {
@@ -388,16 +396,17 @@ body {
 .abas {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
+  max-width: 100%;
 }
 
 .aba-btn {
   text-decoration: none;
   background-color: rgba(18, 44, 57, 0.92);
   color: #ffffff;
-  padding: 8px 14px;
+  padding: 7px 12px;
   border-radius: 9px;
-  font-size: 0.88rem;
+  font-size: clamp(0.78rem, 2.3vw, 0.88rem);
   font-weight: 600;
   border: 1px solid var(--borda-sutil);
   cursor: pointer;
@@ -429,24 +438,25 @@ body {
 /* Estrutura Principal */
 .container {
   max-width: 1360px;
-  margin: 24px auto;
-  padding: 0 16px;
+  width: 100%;
+  margin: 20px auto;
+  padding: 0 14px;
 }
 
 .secao {
-  margin-bottom: 48px;
+  margin-bottom: 42px;
   scroll-margin-top: 120px;
 }
 
 .titulo-secao {
-  font-size: 1.25rem;
+  font-size: clamp(1.02rem, 3vw, 1.25rem);
   font-weight: 800;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   padding-bottom: 8px;
   border-bottom: 2px solid var(--borda-oceano);
   color: #8ce0f0;
   text-transform: uppercase;
-  letter-spacing: 1.4px;
+  letter-spacing: 1.2px;
   text-shadow: 0 2px 10px rgba(23, 130, 158, 0.35);
 }
 
@@ -455,10 +465,11 @@ body {
   background: linear-gradient(180deg, rgba(18, 42, 54, 0.97) 0%, rgba(12, 28, 37, 0.99) 100%);
   border: 1px solid var(--borda-sutil);
   border-radius: 12px;
-  padding: 15px;
-  margin-bottom: 16px;
+  padding: 14px;
+  margin-bottom: 14px;
   box-shadow: var(--sombra-card);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  min-width: 0;
   overflow: visible;
 }
 
@@ -468,13 +479,13 @@ body {
 }
 
 .card-header {
-  padding: 9px 14px;
+  padding: 9px 13px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.9px;
-  font-size: 0.9rem;
+  letter-spacing: 0.8px;
+  font-size: clamp(0.8rem, 2.3vw, 0.9rem);
   border-radius: 8px;
-  margin-bottom: 13px;
+  margin-bottom: 12px;
   color: #ffffff;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 4px 12px rgba(0, 0, 0, 0.28);
 }
@@ -487,12 +498,14 @@ body {
 /* Inputs e Selects */
 input, select, textarea {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   background-color: var(--bg-campo);
   border: 1px solid rgba(140, 224, 240, 0.14);
   color: #ffffff;
-  padding: 8px 11px;
+  padding: 8px 10px;
   border-radius: 7px;
-  font-size: 0.9rem;
+  font-size: clamp(0.82rem, 2.3vw, 0.9rem);
   transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
   white-space: pre-wrap;
   word-break: break-word;
@@ -518,7 +531,7 @@ input:focus, select:focus, textarea:focus {
   background-color: #0b1c26;
 }
 
-/* Nota de Atualizações do Site (Topo, todos incluindo Admin, dispensável até nova atualização) */
+/* Nota de Atualizações do Site */
 .site-release-notes-banner {
   margin: 0 auto 14px;
   padding: 13px 16px;
@@ -677,13 +690,13 @@ input:focus, select:focus, textarea:focus {
 
 .slot-select {
   width: auto;
-  min-width: 190px;
+  min-width: 170px;
   max-width: 280px;
 }
 
 .btn-mini {
-  padding: 6px 12px;
-  font-size: 0.8rem;
+  padding: 6px 11px;
+  font-size: clamp(0.75rem, 2vw, 0.8rem);
 }
 
 .auth-delete-box {
@@ -704,11 +717,12 @@ input:focus, select:focus, textarea:focus {
 .btn-arkan {
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: #ffffff;
-  padding: 9px 16px;
+  padding: 8px 14px;
   border-radius: 9px;
-  font-size: 0.88rem;
+  font-size: clamp(0.8rem, 2.2vw, 0.88rem);
   font-weight: 600;
   cursor: pointer;
+  max-width: 100%;
   transition: background-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
 }
 
@@ -744,7 +758,7 @@ input:focus, select:focus, textarea:focus {
 /* Identificação */
 .grid-identificacao {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 12px;
   margin-bottom: 20px;
 }
@@ -756,6 +770,7 @@ input:focus, select:focus, textarea:focus {
   flex-direction: column;
   gap: 6px;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.36);
+  min-width: 0;
 }
 
 .campo-box label {
@@ -767,7 +782,7 @@ input:focus, select:focus, textarea:focus {
 
 /* Grid Principal de Status */
 .grid-principal {
-  columns: 270px 4;
+  columns: 260px 4;
   column-gap: 16px;
   margin-bottom: 16px;
 }
@@ -805,7 +820,7 @@ input:focus, select:focus, textarea:focus {
 
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 10px;
   text-align: center;
@@ -832,11 +847,11 @@ input:focus, select:focus, textarea:focus {
 /* Defesa */
 .defesa-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px auto 60px;
+  grid-template-columns: minmax(0, 1fr) minmax(48px, 64px) auto minmax(48px, 60px);
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   margin-bottom: 10px;
-  font-size: 0.9rem;
+  font-size: clamp(0.78rem, 2.2vw, 0.9rem);
 }
 
 .destaque-num {
@@ -849,7 +864,7 @@ input:focus, select:focus, textarea:focus {
 /* Atributos & NV */
 .atributos-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(56px, 1fr));
   gap: 7px;
   text-align: center;
 }
@@ -860,12 +875,13 @@ input:focus, select:focus, textarea:focus {
   padding: 8px 5px;
   border-radius: 9px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
+  min-width: 0;
 }
 
 .attr-box label {
   display: block;
   font-weight: 700;
-  font-size: 0.82rem;
+  font-size: clamp(0.72rem, 2vw, 0.82rem);
   margin-bottom: 5px;
   color: #ffffff;
 }
@@ -877,7 +893,7 @@ input:focus, select:focus, textarea:focus {
 
 .grid-nv {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
   gap: 8px;
   text-align: center;
 }
@@ -901,6 +917,8 @@ input:focus, select:focus, textarea:focus {
   padding: 10px;
   margin-bottom: 12px;
   text-align: center;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .nen-hex-svg {
@@ -1048,41 +1066,34 @@ input:focus, select:focus, textarea:focus {
 /* Perícias e Ataques */
 .grid-pericias-ataques {
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
   gap: 16px;
 }
 
-@media (max-width: 950px) {
-  .grid-pericias-ataques,
-  .grid-equip-hab,
-  .grid-historico,
-  .grid-historico-inferior,
-  .grid-guilda {
-    grid-template-columns: 1fr;
-  }
-}
-
 .tabela-scroll {
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   border-radius: 8px;
 }
 
 .tabela-ficha {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: clamp(0.76rem, 2.1vw, 0.85rem);
 }
 
 .tabela-ficha th {
   background: linear-gradient(180deg, #144d3d 0%, #0d362b 100%);
   color: #ffffff;
-  padding: 9px 7px;
+  padding: 8px 6px;
   text-align: left;
   border: 1px solid rgba(140, 224, 240, 0.1);
 }
 
 .tabela-ficha td {
-  padding: 5px 6px;
+  padding: 5px 5px;
   border: 1px solid rgba(140, 224, 240, 0.08);
 }
 
@@ -1117,14 +1128,14 @@ input:focus, select:focus, textarea:focus {
 }
 
 #tabela-pericias select {
-  min-width: 118px;
+  min-width: 104px;
   background-color: #0b1c26;
   color: #ffffff;
   border: 1px solid rgba(140, 224, 240, 0.24);
 }
 
 #tabela-pericias input[type="number"] {
-  min-width: 64px;
+  min-width: 56px;
   text-align: center;
   background-color: #0b1c26;
   color: #ffffff;
@@ -1132,13 +1143,13 @@ input:focus, select:focus, textarea:focus {
 }
 
 #tabela-pericias .attr-tag {
-  min-width: 84px;
-  padding-left: 10px;
-  padding-right: 10px;
+  min-width: 72px;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 #tabela-pericias .total-cell {
-  min-width: 64px;
+  min-width: 56px;
   background: linear-gradient(180deg, #f8d886 0%, #e5b749 100%);
   color: #07131a;
   font-weight: 800;
@@ -1165,7 +1176,7 @@ html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell
   margin-top: 10px;
   display: flex;
   flex-wrap: wrap;
-  gap: 15px;
+  gap: 12px;
   font-size: 0.8rem;
   color: var(--texto-suave);
   background-color: var(--bg-campo);
@@ -1174,18 +1185,114 @@ html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell
   border-radius: 8px;
 }
 
-/* Equipamentos e Habilidades (Hatsu) */
+/* Equipamentos e Habilidades (Hatsu) — Layout equilibrado e sem espaços mortos */
 .grid-equip-hab {
   display: grid;
-  grid-template-columns: 1.2fr 1fr;
-  gap: 16px;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
 }
 
+.grid-equip-hab > div {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.grid-equip-hab .card {
+  margin-bottom: 0;
+}
+
+.barra-carga {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+  background-color: rgba(16, 44, 58, 0.9);
+  border: 1px solid var(--borda-sutil);
+  padding: 8px 11px;
+  border-radius: 8px;
+  font-size: clamp(0.76rem, 2vw, 0.84rem);
+}
+
+.barra-carga label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  cursor: pointer;
+}
+
+.barra-carga input[type="checkbox"] {
+  width: auto;
+}
+
+.mini-input {
+  width: 62px;
+  min-width: 48px;
+  text-align: center;
+  padding: 5px 6px;
+}
+
+.tabela-categorias {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 10px;
+  text-align: center;
+  font-size: clamp(0.75rem, 2vw, 0.84rem);
+}
+
+.tabela-categorias th {
+  background: linear-gradient(180deg, #17829e 0%, #0d5c75 100%);
+  padding: 6px 4px;
+  border: 1px solid rgba(140, 224, 240, 0.12);
+}
+
+.tabela-categorias td {
+  padding: 4px;
+  border: 1px solid rgba(140, 224, 240, 0.08);
+}
+
+.tabela-categorias input {
+  padding: 5px 4px;
+  text-align: center;
+}
+
+/* Tabela de Equipamentos compacta e sem estourar */
+.grid-equip-hab .tabela-scroll {
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.grid-equip-hab .tabela-ficha th,
+.grid-equip-hab .tabela-ficha td {
+  padding: 6px 5px;
+  font-size: clamp(0.74rem, 1.95vw, 0.83rem);
+  vertical-align: middle;
+}
+
+.grid-equip-hab .tabela-ficha input,
+.grid-equip-hab .tabela-ficha select {
+  padding: 6px 7px;
+  font-size: clamp(0.74rem, 1.95vw, 0.83rem);
+}
+
+/* Proficiências com altura confortável sem deixar vazio exagerado */
+.grid-equip-hab textarea {
+  min-height: 120px;
+  font-size: clamp(0.8rem, 2.1vw, 0.88rem);
+}
+
+/* Formulário e Grade de Habilidades (Hatsu) */
 .hab-form-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
   margin-bottom: 12px;
+  align-items: center;
 }
 
 .hab-form-grid button {
@@ -1193,31 +1300,38 @@ html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell
 }
 
 .lista-habilidades-nen {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+  align-items: stretch;
 }
 
 .hab-item-card {
-  background-color: var(--bg-campo);
+  background: linear-gradient(180deg, rgba(11, 28, 37, 0.96) 0%, rgba(8, 21, 28, 0.98) 100%);
   border: 1px solid var(--borda-sutil);
   border-left: 3px solid var(--nen-primaria);
-  border-radius: 9px;
-  padding: 10px 12px;
+  border-radius: 10px;
+  padding: 11px 12px;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   justify-content: space-between;
-  align-items: center;
   gap: 10px;
+  min-width: 0;
+  transition: border-color 0.2s ease, transform 0.15s ease;
+}
+
+.hab-item-card:hover {
+  border-color: var(--nen-borda);
+  transform: translateY(-1px);
 }
 
 .hab-item-info {
-  flex: 1 1 200px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 .hab-item-titulo {
-  font-size: 0.9rem;
+  font-size: clamp(0.84rem, 2.2vw, 0.92rem);
   font-weight: 700;
   color: #ffffff;
   white-space: pre-wrap;
@@ -1225,26 +1339,27 @@ html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell
 }
 
 .hab-item-meta {
-  font-size: 0.77rem;
+  font-size: clamp(0.72rem, 1.9vw, 0.78rem);
   color: var(--nen-destaque);
-  margin-top: 2px;
+  margin-top: 3px;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .hab-item-desc {
-  font-size: 0.82rem;
+  font-size: clamp(0.76rem, 2vw, 0.83rem);
   color: var(--texto-suave);
-  margin-top: 4px;
+  margin-top: 5px;
+  line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .hab-item-feedback {
-  font-size: 0.79rem;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--destaque-ouro);
-  margin-top: 5px;
+  margin-top: 6px;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -1253,53 +1368,13 @@ html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(140, 224, 240, 0.08);
 }
 
-.barra-carga {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-  background-color: rgba(16, 44, 58, 0.9);
-  border: 1px solid var(--borda-sutil);
-  padding: 9px 12px;
-  border-radius: 8px;
-}
-
-.barra-carga label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: auto;
-}
-
-.barra-carga input[type="checkbox"] {
-  width: auto;
-}
-
-.mini-input {
-  width: 66px;
+.hab-item-acoes .btn-arkan {
+  flex: 1 1 auto;
   text-align: center;
-}
-
-.tabela-categorias {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 12px;
-  text-align: center;
-}
-
-.tabela-categorias th {
-  background: linear-gradient(180deg, #17829e 0%, #0d5c75 100%);
-  padding: 6px;
-  border: 1px solid rgba(140, 224, 240, 0.12);
-}
-
-.tabela-categorias td {
-  padding: 5px;
-  border: 1px solid rgba(140, 224, 240, 0.08);
 }
 
 /* Histórico & Guilda */
@@ -1307,8 +1382,42 @@ html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell
 .grid-historico-inferior,
 .grid-guilda {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+@media (max-width: 950px) {
+  .grid-pericias-ataques,
+  .grid-equip-hab,
+  .grid-historico,
+  .grid-historico-inferior,
+  .grid-guilda {
+    grid-template-columns: 1fr;
+  }
+
+  .lista-habilidades-nen {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .container {
+    padding: 0 10px;
+  }
+
+  .card {
+    padding: 11px;
+  }
+
+  .grid-equip-hab .tabela-ficha th,
+  .grid-equip-hab .tabela-ficha td {
+    padding: 5px 4px;
+    font-size: 0.72rem;
+  }
+
+  .guilda-gasto-manual {
+    grid-template-columns: 1fr;
+  }
 }
 
 .campo-hist {
@@ -1326,6 +1435,7 @@ html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell
 
 .totais-guilda {
   display: flex;
+  flex-wrap: wrap;
   gap: 15px;
   margin-top: 12px;
   padding-top: 11px;
@@ -1333,12 +1443,12 @@ html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell
 }
 
 .totais-guilda div {
-  flex: 1;
+  flex: 1 1 140px;
 }
 
 .guilda-gasto-manual {
   display: grid;
-  grid-template-columns: 90px 1fr auto;
+  grid-template-columns: minmax(80px, 96px) minmax(0, 1fr) auto;
   gap: 8px;
   margin-bottom: 12px;
 }
