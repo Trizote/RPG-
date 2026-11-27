@@ -713,7 +713,8 @@ function handleUserImportJsonFile(event) {
         else if (typeof v === "string" || typeof v === "number") safeFields[k] = String(v).slice(0, 5000);
       });
 
-      applySheetData({ fields: safeFields });
+      applySheetData({ fields: safeFields }, true);
+      saveCurrentFormIntoActiveSlotMemory();
       setStatusBanner("Ficha importada com sucesso a partir do arquivo JSON.", "success");
       await persistSheet(true);
     } catch {
@@ -831,21 +832,51 @@ function syncSlotDropdownUI() {
   });
 }
 
-function extractCurrentFormFieldsOnly() {
-  const raw = collectSheetData().fields;
-  const clean = createSafeRecord();
-  Object.entries(raw).forEach(([k, v]) => {
-    if (isValidFieldKey(k) && k !== ADMIN_NOTICE_FIELD_KEY && k !== MULTI_SLOTS_FIELD_KEY) {
-      clean[k] = v;
+function readRawFormControlsMap() {
+  recalculateSkillsTable();
+  syncAbilitiesToHiddenInput();
+
+  const fields = createSafeRecord();
+  const mainEl = document.querySelector("main.container");
+  if (!mainEl) return fields;
+
+  const controls = mainEl.querySelectorAll("input, select, textarea");
+  controls.forEach((ctrl, index) => {
+    if (!ctrl || ctrl.closest("#login-firebase")) return;
+    if (
+      ctrl.id === "hab-nome-input" ||
+      ctrl.id === "hab-tipo-input" ||
+      ctrl.id === "hab-custo-input" ||
+      ctrl.id === "hab-desc-input" ||
+      ctrl.id === "guilda-gasto-valor" ||
+      ctrl.id === "guilda-gasto-motivo"
+    ) {
+      return;
+    }
+
+    const key = buildFieldKey(ctrl, index);
+    if (!isValidFieldKey(key)) return;
+
+    if (ctrl.type === "checkbox") {
+      fields[key] = Boolean(ctrl.checked);
+    } else {
+      const normalized = normalizeControlValue(ctrl, ctrl.value);
+      if (ctrl.value !== normalized && document.activeElement !== ctrl) {
+        ctrl.value = normalized;
+      }
+      fields[key] = normalized;
     }
   });
-  return clean;
+
+  return fields;
 }
 
 function saveCurrentFormIntoActiveSlotMemory() {
   const activeId = state.accountSlots.activeSlotId || "slot-1";
-  const currentFields = extractCurrentFormFieldsOnly();
-  const agentName = sanitizeSingleLine(currentFields["id:nome"] || "", 45) || "Agente sem nome";
+  const currentFields = readRawFormControlsMap();
+  const existingName = state.accountSlots.slots[activeId]?.name || "Agente Principal";
+  const agentName = sanitizeSingleLine(currentFields["id:nome"] || "", 45) || existingName;
+
   state.accountSlots.slots[activeId] = {
     name: agentName,
     fields: currentFields
@@ -857,10 +888,18 @@ async function handleSwitchAccountSlot(nextSlotId) {
   if (!nextSlotId || nextSlotId === state.accountSlots.activeSlotId) return;
   if (!Object.prototype.hasOwnProperty.call(state.accountSlots.slots, nextSlotId)) return;
 
-  saveCurrentFormIntoActiveSlotMemory();
-  state.accountSlots.activeSlotId = nextSlotId;
+  if (state.saveTimer) {
+    clearTimeout(state.saveTimer);
+    state.saveTimer = null;
+  }
 
+  // 1. Guarda primeiro a ficha atual inteira no slot antigo antes de zerar a tela
+  saveCurrentFormIntoActiveSlotMemory();
+
+  // 2. Troca o slot ativo e carrega os dados dele
+  state.accountSlots.activeSlotId = nextSlotId;
   const targetSlot = state.accountSlots.slots[nextSlotId];
+
   resetSheetFieldsToDefault();
   applySheetData({ fields: targetSlot.fields || createSafeRecord() }, true);
   syncSlotDropdownUI();
@@ -869,38 +908,49 @@ async function handleSwitchAccountSlot(nextSlotId) {
 }
 
 async function handleCreateNewAccountSlot() {
-  if (isInspectionReadOnlyActive()) return;
+  if (isInspectionReadOnlyActive() || state.isSaving) return;
+
   const existingKeys = Object.keys(state.accountSlots.slots || {});
   if (existingKeys.length >= MAX_ACCOUNT_SLOTS) {
     setStatusBanner(`Limite máximo de ${MAX_ACCOUNT_SLOTS} fichas por conta atingido.`, "warning");
     return;
   }
 
+  if (state.saveTimer) {
+    clearTimeout(state.saveTimer);
+    state.saveTimer = null;
+  }
+
+  // 1. Captura e congela a ficha atual no slot antigo ANTES de qualquer limpeza de tela
   saveCurrentFormIntoActiveSlotMemory();
+
+  // 2. Cria o novo slot e troca o ponteiro activeSlotId ANTES de chamar resetSheetFieldsToDefault()
   const newId = `slot-${Date.now()}`;
   const label = `Novo Agente #${existingKeys.length + 1}`;
+  state.accountSlots.activeSlotId = newId;
 
   resetSheetFieldsToDefault();
   const nomeEl = document.getElementById("nome");
   if (nomeEl) nomeEl.value = label;
 
-  state.accountSlots.activeSlotId = newId;
-  state.accountSlots.slots[newId] = {
-    name: label,
-    fields: extractCurrentFormFieldsOnly()
-  };
-
-  syncSlotDropdownUI();
-  setStatusBanner(`Nova ficha "${label}" criada na sua conta.`, "success");
+  // 3. Salva a nova ficha vazia no novo slot e sincroniza ambos na nuvem
+  saveCurrentFormIntoActiveSlotMemory();
+  state.lastSavedSnapshot = "";
+  setStatusBanner(`Nova ficha "${label}" criada. A ficha anterior continua salva no seletor acima.`, "success");
   await persistSheet(true);
 }
 
 async function handleDeleteCurrentAccountSlot() {
-  if (isInspectionReadOnlyActive()) return;
+  if (isInspectionReadOnlyActive() || state.isSaving) return;
   const keys = Object.keys(state.accountSlots.slots || {});
   if (keys.length <= 1) {
     setStatusBanner("Você precisa manter pelo menos 1 ficha na conta. Use 'Excluir ficha' para zerá-la.", "warning");
     return;
+  }
+
+  if (state.saveTimer) {
+    clearTimeout(state.saveTimer);
+    state.saveTimer = null;
   }
 
   const currentId = state.accountSlots.activeSlotId;
@@ -913,6 +963,7 @@ async function handleDeleteCurrentAccountSlot() {
   resetSheetFieldsToDefault();
   applySheetData({ fields: state.accountSlots.slots[fallbackId].fields || createSafeRecord() }, true);
   syncSlotDropdownUI();
+  state.lastSavedSnapshot = "";
   setStatusBanner("Ficha removida da lista da conta.", "success");
   await persistSheet(true);
 }
@@ -2038,7 +2089,8 @@ async function handleAdminImportJson(rawJsonText) {
       else if (typeof v === "string" || typeof v === "number") safeFields[k] = String(v).slice(0, 5000);
     });
 
-    applySheetData({ fields: safeFields });
+    applySheetData({ fields: safeFields }, true);
+    saveCurrentFormIntoActiveSlotMemory();
     appendAdminLog(`JSON importado para UID ${getActiveTargetUid()}`);
     await persistSheet(true);
   } catch {
@@ -2070,7 +2122,8 @@ async function handleAdminApplyTemplate(templateKey) {
     if (isValidFieldKey(k)) mergedFields[k] = v;
   });
 
-  applySheetData({ fields: mergedFields });
+  applySheetData({ fields: mergedFields }, true);
+  saveCurrentFormIntoActiveSlotMemory();
   appendAdminLog(`Modelo "${tpl.label}" aplicado ao UID ${getActiveTargetUid()}`);
   await persistSheet(true);
 }
@@ -2134,7 +2187,7 @@ async function handleAdminLoadTargetUid(rawUidOverride) {
   updateAdminBarUI();
   appendAdminLog(`Ficha carregada do UID ${uid}`);
   setStatusBanner(`Carregando ficha do UID ${uid}...`, "info");
-  await loadFromFirestore(uid);
+  await loadFromFirestore(uid, uid !== state.user.uid);
 }
 
 async function handleAdminReturnToOwnSheet(event) {
@@ -2148,7 +2201,7 @@ async function handleAdminReturnToOwnSheet(event) {
   updateAdminBarUI();
   appendAdminLog("Retornou para a própria ficha do Admin");
   setStatusBanner("Voltando para a sua própria ficha...", "info");
-  await loadFromFirestore(state.user.uid);
+  await loadFromFirestore(state.user.uid, false);
 }
 
 async function handleAdminSendNotice(overrideData) {
@@ -2603,42 +2656,7 @@ function computeFieldsSnapshot(fieldsObj) {
 }
 
 function collectSheetData() {
-  recalculateSkillsTable();
-  syncAbilitiesToHiddenInput();
-
-  const fields = createSafeRecord();
-  const mainEl = document.querySelector("main.container");
-  if (!mainEl) {
-    return { fields, atualizadoEm: new Date().toISOString() };
-  }
-
-  const controls = mainEl.querySelectorAll("input, select, textarea");
-  controls.forEach((ctrl, index) => {
-    if (!ctrl || ctrl.closest("#login-firebase")) return;
-    if (
-      ctrl.id === "hab-nome-input" ||
-      ctrl.id === "hab-tipo-input" ||
-      ctrl.id === "hab-custo-input" ||
-      ctrl.id === "hab-desc-input" ||
-      ctrl.id === "guilda-gasto-valor" ||
-      ctrl.id === "guilda-gasto-motivo"
-    ) {
-      return;
-    }
-
-    const key = buildFieldKey(ctrl, index);
-    if (!isValidFieldKey(key)) return;
-
-    if (ctrl.type === "checkbox") {
-      fields[key] = Boolean(ctrl.checked);
-    } else {
-      const normalized = normalizeControlValue(ctrl, ctrl.value);
-      if (ctrl.value !== normalized && document.activeElement !== ctrl) {
-        ctrl.value = normalized;
-      }
-      fields[key] = normalized;
-    }
-  });
+  const fields = readRawFormControlsMap();
 
   if (state.user && !state.offlineMode) {
     const activeId = state.accountSlots.activeSlotId || "slot-1";
@@ -2648,16 +2666,24 @@ function collectSheetData() {
         slotFields[k] = v;
       }
     });
-    const agentName = sanitizeSingleLine(slotFields["id:nome"] || "", 45) || "Agente Principal";
-    state.accountSlots.slots[activeId] = {
+
+    const existingName = state.accountSlots.slots[activeId]?.name || "Agente Principal";
+    const agentName = sanitizeSingleLine(slotFields["id:nome"] || "", 45) || existingName;
+
+    const nextSlots = createSafeRecord();
+    Object.entries(state.accountSlots.slots || {}).forEach(([k, v]) => {
+      nextSlots[k] = v;
+    });
+    nextSlots[activeId] = {
       name: agentName,
       fields: slotFields
     };
+    state.accountSlots.slots = nextSlots;
     syncSlotDropdownUI();
 
     const serializedRegistry = JSON.stringify({
       activeSlotId: activeId,
-      slots: state.accountSlots.slots
+      slots: nextSlots
     });
     if (serializedRegistry.length <= 280000) {
       fields[MULTI_SLOTS_FIELD_KEY] = serializedRegistry;
@@ -2915,7 +2941,6 @@ function resetSheetFieldsToDefault() {
   renderNenAbilitiesList();
   recalculateSkillsTable();
   state.lastSavedSnapshot = "";
-  captureBaselineFields(collectSheetData().fields);
   syncNenCategoryFromSelect();
   syncAdminQuickInputsFromSheet();
 }
@@ -3425,6 +3450,7 @@ async function handleConfirmClearSheet(event) {
   }
 
   resetSheetFieldsToDefault();
+  saveCurrentFormIntoActiveSlotMemory();
   state.activeNotice = null;
   scheduleNoticeExpiryCheck();
   renderPlayerNoticeBanner();
@@ -3443,10 +3469,16 @@ async function handleConfirmClearSheet(event) {
 
   if (state.firebaseReady && state.db && state.firebaseModules && targetUid) {
     try {
-      const { doc, deleteDoc } = state.firebaseModules.firestoreMod;
-      await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, targetUid));
-      state.lastSavedSnapshot = "";
-      setStatusBanner("Ficha excluída da nuvem e zerada com sucesso.", "success");
+      const slotKeys = Object.keys(state.accountSlots.slots || {});
+      if (slotKeys.length > 1) {
+        await persistSheet(true);
+        setStatusBanner("Ficha atual zerada mantendo as demais fichas da conta.", "success");
+      } else {
+        const { doc, deleteDoc } = state.firebaseModules.firestoreMod;
+        await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, targetUid));
+        state.lastSavedSnapshot = "";
+        setStatusBanner("Ficha excluída da nuvem e zerada com sucesso.", "success");
+      }
     } catch (err) {
       const code = err && typeof err.code === "string" ? err.code : "";
       setStatusBanner(
