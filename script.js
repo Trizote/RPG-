@@ -3084,19 +3084,11 @@ async function initFirebase() {
       }
       updateAuthUI();
       updateScreenAccess();
-
       if (user) {
         if (!state.isDeleting) {
           const targetUid = getActiveTargetUid();
           const isRemoteTarget = user.uid === ADMIN_UID && targetUid && targetUid !== user.uid;
-          if (typeof loadFromFirestore === "function") {
-            await loadFromFirestore(targetUid || user.uid);
-          } else {
-            const localFallback = loadLocalData();
-            if (localFallback && !isRemoteTarget) {
-              applySheetData(localFallback);
-            }
-          }
+          await loadFromFirestore(targetUid || user.uid, isRemoteTarget);
         }
       } else if (!state.offlineMode) {
         resetSheetFieldsToDefault();
@@ -3107,3 +3099,611 @@ async function initFirebase() {
     setEntradaStatus(formatDatabaseOrHostingError(err));
   }
 }
+
+/* --------------------------------------------------------------------------
+   Persistência no Cloud Firestore + LocalStorage
+   -------------------------------------------------------------------------- */
+async function loadFromFirestore(uidToLoad, isRemoteTarget = false) {
+  const targetUid = sanitizeTargetUid(uidToLoad);
+  if (!targetUid) return;
+
+  if (!state.firebaseReady || !state.db || !state.firebaseModules) {
+    if (!isRemoteTarget) {
+      const localData = loadLocalData();
+      if (localData) applySheetData(localData);
+    }
+    return;
+  }
+
+  const { doc, getDoc } = state.firebaseModules.firestoreMod;
+  const docRef = doc(state.db, FIRESTORE_COLLECTION, targetUid);
+
+  try {
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const cloudData = snap.data();
+      resetSheetFieldsToDefault();
+      applySheetData(cloudData);
+      if (!isRemoteTarget) {
+        saveLocalData(cloudData);
+      }
+      setStatusBanner(
+        isRemoteTarget
+          ? `Ficha do UID ${targetUid} carregada da nuvem.`
+          : "Ficha carregada e sincronizada com a nuvem.",
+        "success"
+      );
+    } else {
+      resetSheetFieldsToDefault();
+      if (!isRemoteTarget) {
+        const localData = loadLocalData();
+        if (localData && localData.fields && Object.keys(localData.fields).length > 0) {
+          applySheetData(localData);
+          setStatusBanner("Dados locais restaurados. Clique em 'Salvar na nuvem' para sincronizar.", "info");
+        } else {
+          setStatusBanner("Nova ficha pronta. Preencha os campos para salvar automaticamente.", "info");
+        }
+      } else {
+        setStatusBanner(`Nenhuma ficha salva encontrada para o UID ${targetUid}.`, "info");
+      }
+    }
+  } catch (err) {
+    const code = err && typeof err.code === "string" ? err.code : "";
+    if (!isRemoteTarget) {
+      const localData = loadLocalData();
+      if (localData) applySheetData(localData);
+    }
+    setStatusBanner(
+      code === "permission-denied"
+        ? "Permissão negada no Firestore ao carregar a ficha."
+        : "Não foi possível carregar da nuvem agora. Verifique sua conexão.",
+      "error"
+    );
+  }
+}
+
+async function persistSheet(forceImmediate = false) {
+  if (isInspectionReadOnlyActive()) {
+    setStatusBanner("Modo somente leitura ativo: alterações não foram salvas.", "warning");
+    return;
+  }
+
+  if (state.saveTimer) {
+    clearTimeout(state.saveTimer);
+    state.saveTimer = null;
+  }
+
+  const payload = buildSanitizedCloudPayload();
+  const snapshot = computeFieldsSnapshot(payload.fields);
+
+  if (!forceImmediate && snapshot && snapshot === state.lastSavedSnapshot) {
+    return;
+  }
+
+  if (state.offlineMode || !state.user) {
+    state.lastSavedSnapshot = snapshot;
+    captureBaselineFields(payload.fields);
+    if (forceImmediate) {
+      setStatusBanner(
+        "Modo offline/local ativo: os dados permanecem apenas nesta aba e serão perdidos ao recarregar.",
+        "warning"
+      );
+    }
+    return;
+  }
+
+  const targetUid = getActiveTargetUid();
+  const isRemoteTarget = isCurrentUserAdmin() && targetUid !== state.user.uid;
+  if (!isRemoteTarget) {
+    saveLocalData(payload);
+  }
+
+  if (!state.firebaseReady || !state.db || !state.firebaseModules) {
+    state.lastSavedSnapshot = snapshot;
+    captureBaselineFields(payload.fields);
+    if (forceImmediate) {
+      setStatusBanner("Salvo localmente no navegador (nuvem indisponível).", "warning");
+    }
+    return;
+  }
+
+  const now = Date.now();
+  const elapsed = now - state.lastCloudWriteAt;
+  if (!forceImmediate && elapsed < MIN_CLOUD_SAVE_INTERVAL_MS) {
+    scheduleAutoSave(MIN_CLOUD_SAVE_INTERVAL_MS - elapsed + 100);
+    return;
+  }
+
+  if (state.isSaving) {
+    scheduleAutoSave(900);
+    return;
+  }
+
+  state.isSaving = true;
+  try {
+    const { doc, setDoc } = state.firebaseModules.firestoreMod;
+    const docRef = doc(state.db, FIRESTORE_COLLECTION, targetUid);
+    await setDoc(docRef, payload);
+
+    state.lastCloudWriteAt = Date.now();
+    state.lastSavedSnapshot = snapshot;
+    captureBaselineFields(payload.fields);
+
+    if (state.adminActiveCommand === "/diff") {
+      handleAdminShowDiff();
+    }
+
+    if (forceImmediate) {
+      setStatusBanner(
+        isRemoteTarget
+          ? `Alterações salvas na nuvem para o UID ${targetUid}.`
+          : "Ficha salva na nuvem com sucesso.",
+        "success"
+      );
+    }
+  } catch (err) {
+    const code = err && typeof err.code === "string" ? err.code : "";
+    setStatusBanner(
+      code === "permission-denied"
+        ? "Permissão negada no Firestore ao salvar a ficha."
+        : "Erro ao sincronizar ficha com a nuvem.",
+      "error"
+    );
+  } finally {
+    state.isSaving = false;
+  }
+}
+
+function scheduleAutoSave(delayMs = 1300) {
+  if (isInspectionReadOnlyActive()) return;
+  if (state.saveTimer) {
+    clearTimeout(state.saveTimer);
+  }
+  state.saveTimer = setTimeout(() => {
+    state.saveTimer = null;
+    persistSheet(false);
+  }, delayMs);
+}
+
+/* --------------------------------------------------------------------------
+   Autenticação Firebase (Login, Cadastro, Sair, Limpar Ficha, Excluir Conta)
+   -------------------------------------------------------------------------- */
+function updatePasswordVisibilityUI() {
+  const passInput = document.getElementById("auth-password");
+  const toggleBtn = document.getElementById("auth-toggle-password");
+  if (passInput) {
+    passInput.type = state.showPassword ? "text" : "password";
+  }
+  if (toggleBtn) {
+    toggleBtn.textContent = state.showPassword ? "Ocultar" : "Mostrar";
+    toggleBtn.setAttribute("aria-pressed", state.showPassword ? "true" : "false");
+  }
+}
+
+function updateAuthModeUI() {
+  const submitBtn = document.getElementById("auth-submit-btn");
+  const toggleModeBtn = document.getElementById("auth-toggle-mode");
+  const passInput = document.getElementById("auth-password");
+
+  const isRegister = state.authMode === "register";
+  if (submitBtn) {
+    submitBtn.textContent = isRegister ? "Criar conta e entrar" : "Entrar";
+  }
+  if (toggleModeBtn) {
+    toggleModeBtn.textContent = isRegister ? "Já tenho conta (Entrar)" : "Criar nova conta";
+  }
+  if (passInput) {
+    passInput.setAttribute("autocomplete", isRegister ? "new-password" : "current-password");
+  }
+}
+
+function updateAuthUI() {
+  const loggedInBox = document.getElementById("auth-logged-in");
+  const offlineBox = document.getElementById("offline-session-box");
+  const userEmailEl = document.getElementById("auth-user-email");
+
+  if (state.user) {
+    if (loggedInBox) loggedInBox.hidden = false;
+    if (offlineBox) offlineBox.hidden = true;
+    if (userEmailEl) {
+      renderSafeText(userEmailEl, state.user.email || state.user.uid || "Agente", 120);
+    }
+  } else if (state.offlineMode) {
+    if (loggedInBox) loggedInBox.hidden = true;
+    if (offlineBox) offlineBox.hidden = false;
+    if (userEmailEl) userEmailEl.textContent = "";
+  } else {
+    if (loggedInBox) loggedInBox.hidden = true;
+    if (offlineBox) offlineBox.hidden = true;
+    if (userEmailEl) userEmailEl.textContent = "";
+  }
+}
+
+async function handleAuthFormSubmit(event) {
+  event.preventDefault();
+  if (event && event.isTrusted === false) return;
+
+  const emailEl = document.getElementById("auth-email");
+  const passEl = document.getElementById("auth-password");
+  const submitBtn = document.getElementById("auth-submit-btn");
+
+  const email = sanitizeSingleLine(emailEl ? emailEl.value : "", 160);
+  const password = String(passEl ? passEl.value : "");
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    setEntradaStatus("Informe um endereço de e-mail válido.");
+    if (emailEl) emailEl.focus();
+    return;
+  }
+
+  if (password.length < 6) {
+    setEntradaStatus("A senha deve ter pelo menos 6 caracteres.");
+    if (passEl) passEl.focus();
+    return;
+  }
+
+  if (!state.firebaseReady || !state.auth || !state.firebaseModules) {
+    setEntradaStatus("Conectando ao Firebase... Aguarde um instante ou use o modo offline/local.");
+    await initFirebase();
+    if (!state.firebaseReady || !state.auth || !state.firebaseModules) {
+      return;
+    }
+  }
+
+  if (submitBtn) submitBtn.disabled = true;
+  setEntradaStatus(
+    state.authMode === "register" ? "Criando sua conta no Firebase..." : "Entrando na sua conta..."
+  );
+
+  try {
+    await checkEnvironmentAndFirestoreBeforeLogin();
+    const { signInWithEmailAndPassword, createUserWithEmailAndPassword } =
+      state.firebaseModules.authMod;
+
+    if (state.authMode === "register") {
+      await createUserWithEmailAndPassword(state.auth, email, password);
+    } else {
+      await signInWithEmailAndPassword(state.auth, email, password);
+    }
+  } catch (err) {
+    const code = err && typeof err.code === "string" ? err.code : "";
+    if (
+      code === "offline-browser" ||
+      code === "unavailable" ||
+      code === "deadline-exceeded" ||
+      code === "failed-precondition"
+    ) {
+      setEntradaStatus(formatDatabaseOrHostingError(err));
+    } else {
+      setEntradaStatus(mapFirebaseAuthError(err));
+    }
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+async function handleSignOut(event) {
+  if (event && event.isTrusted === false) return;
+
+  if (state.saveTimer) {
+    clearTimeout(state.saveTimer);
+    state.saveTimer = null;
+  }
+
+  if (state.user && state.firebaseReady && state.auth && state.firebaseModules) {
+    try {
+      await persistSheet(true);
+      await state.firebaseModules.authMod.signOut(state.auth);
+    } catch {
+      setStatusBanner("Erro ao encerrar sessão no Firebase.", "error");
+      return;
+    }
+  }
+
+  state.user = null;
+  state.offlineMode = false;
+  state.adminTargetUid = "";
+  state.adminDraftUid = "";
+  state.adminReadOnly = false;
+  state.activeNotice = null;
+  scheduleNoticeExpiryCheck();
+  saveAdminTargetUidToStorage("");
+  clearAuthSensitiveInputs();
+  setStatusBanner("");
+  setEntradaStatus("");
+  updateAuthUI();
+  updateScreenAccess();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function handleConfirmClearSheet(event) {
+  if (event && event.isTrusted === false) return;
+
+  const confirmBox = document.getElementById("sheet-clear-confirm-box");
+  if (confirmBox) confirmBox.hidden = true;
+
+  if (isInspectionReadOnlyActive()) {
+    setStatusBanner("Desative 'Somente leitura' antes de excluir a ficha.", "warning");
+    return;
+  }
+
+  resetSheetFieldsToDefault();
+  state.activeNotice = null;
+  scheduleNoticeExpiryCheck();
+  renderPlayerNoticeBanner();
+
+  if (state.offlineMode || !state.user) {
+    clearLocalData();
+    setStatusBanner("Ficha limpa na sessão offline/local.", "success");
+    return;
+  }
+
+  const targetUid = getActiveTargetUid();
+  const isRemoteTarget = isCurrentUserAdmin() && targetUid !== state.user.uid;
+  if (!isRemoteTarget) {
+    clearLocalData();
+  }
+
+  if (state.firebaseReady && state.db && state.firebaseModules && targetUid) {
+    try {
+      const { doc, deleteDoc } = state.firebaseModules.firestoreMod;
+      await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, targetUid));
+      state.lastSavedSnapshot = "";
+      setStatusBanner("Ficha excluída da nuvem e zerada com sucesso.", "success");
+    } catch (err) {
+      const code = err && typeof err.code === "string" ? err.code : "";
+      setStatusBanner(
+        code === "permission-denied"
+          ? "Permissão negada no Firestore ao excluir a ficha."
+          : "Ficha zerada na tela, mas houve erro ao apagar no Firestore.",
+        "error"
+      );
+    }
+  }
+}
+
+async function handleConfirmDeleteAccount(event) {
+  if (event && event.isTrusted === false) return;
+  if (!state.user || !state.firebaseReady || !state.auth || !state.firebaseModules) return;
+
+  const confirmBox = document.getElementById("auth-delete-confirm-box");
+  if (confirmBox) confirmBox.hidden = true;
+
+  const currentUser = state.user;
+  const uid = currentUser.uid;
+  state.isDeleting = true;
+
+  try {
+    if (state.db) {
+      const { doc, deleteDoc } = state.firebaseModules.firestoreMod;
+      await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, uid));
+    }
+
+    await state.firebaseModules.authMod.deleteUser(currentUser);
+    clearLocalData();
+    resetSheetFieldsToDefault();
+    state.user = null;
+    state.offlineMode = false;
+    state.adminTargetUid = "";
+    saveAdminTargetUidToStorage("");
+    updateAuthUI();
+    updateScreenAccess();
+    setEntradaStatus("Conta e ficha excluídas permanentemente.");
+  } catch (err) {
+    const code = err && typeof err.code === "string" ? err.code : "";
+    if (code === "auth/requires-recent-login") {
+      setStatusBanner(
+        "Por segurança, saia e entre novamente antes de excluir sua conta.",
+        "warning"
+      );
+    } else {
+      setStatusBanner("Não foi possível excluir a conta agora.", "error");
+    }
+  } finally {
+    state.isDeleting = false;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Inicialização e Eventos da Interface
+   -------------------------------------------------------------------------- */
+function bindUIEvents() {
+  const authForm = document.getElementById("auth-form");
+  if (authForm) {
+    authForm.addEventListener("submit", handleAuthFormSubmit);
+  }
+
+  const togglePassBtn = document.getElementById("auth-toggle-password");
+  if (togglePassBtn) {
+    togglePassBtn.addEventListener("click", () => {
+      state.showPassword = !state.showPassword;
+      updatePasswordVisibilityUI();
+    });
+  }
+
+  const toggleModeBtn = document.getElementById("auth-toggle-mode");
+  if (toggleModeBtn) {
+    toggleModeBtn.addEventListener("click", () => {
+      state.authMode = state.authMode === "login" ? "register" : "login";
+      setEntradaStatus("");
+      updateAuthModeUI();
+    });
+  }
+
+  const offlineBtn = document.getElementById("btn-entrar-offline");
+  if (offlineBtn) {
+    offlineBtn.addEventListener("click", enterOfflineTemporaryMode);
+  }
+
+  const voltarEntradaBtn = document.getElementById("btn-voltar-entrada");
+  if (voltarEntradaBtn) {
+    voltarEntradaBtn.addEventListener("click", handleSignOut);
+  }
+
+  const irLoginNuvemBtn = document.getElementById("btn-ir-login-nuvem");
+  if (irLoginNuvemBtn) {
+    irLoginNuvemBtn.addEventListener("click", handleSignOut);
+  }
+
+  const logoutBtn = document.getElementById("auth-logout-btn");
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", handleSignOut);
+  }
+
+  const saveSheetBtn = document.getElementById("btn-save-sheet");
+  if (saveSheetBtn) {
+    saveSheetBtn.addEventListener("click", () => persistSheet(true));
+  }
+
+  const syncBtn = document.getElementById("auth-sync-btn");
+  if (syncBtn) {
+    syncBtn.addEventListener("click", () => persistSheet(true));
+  }
+
+  const clearOpenBtn = document.getElementById("sheet-clear-open-btn");
+  const clearBox = document.getElementById("sheet-clear-confirm-box");
+  const clearConfirmBtn = document.getElementById("sheet-clear-confirm-btn");
+  const clearCancelBtn = document.getElementById("sheet-clear-cancel-btn");
+  if (clearOpenBtn && clearBox) {
+    clearOpenBtn.addEventListener("click", () => {
+      clearBox.hidden = !clearBox.hidden;
+    });
+  }
+  if (clearCancelBtn && clearBox) {
+    clearCancelBtn.addEventListener("click", () => {
+      clearBox.hidden = true;
+    });
+  }
+  if (clearConfirmBtn) {
+    clearConfirmBtn.addEventListener("click", handleConfirmClearSheet);
+  }
+
+  const clearOfflineBtn = document.getElementById("sheet-clear-offline-btn");
+  if (clearOfflineBtn) {
+    clearOfflineBtn.addEventListener("click", handleConfirmClearSheet);
+  }
+
+  const deleteOpenBtn = document.getElementById("auth-delete-open-btn");
+  const deleteBox = document.getElementById("auth-delete-confirm-box");
+  const deleteConfirmBtn = document.getElementById("auth-delete-confirm-btn");
+  const deleteCancelBtn = document.getElementById("auth-delete-cancel-btn");
+  if (deleteOpenBtn && deleteBox) {
+    deleteOpenBtn.addEventListener("click", () => {
+      deleteBox.hidden = !deleteBox.hidden;
+    });
+  }
+  if (deleteCancelBtn && deleteBox) {
+    deleteCancelBtn.addEventListener("click", () => {
+      deleteBox.hidden = true;
+    });
+  }
+  if (deleteConfirmBtn) {
+    deleteConfirmBtn.addEventListener("click", handleConfirmDeleteAccount);
+  }
+
+  const nenSelect = document.getElementById("categoria-principal-nen");
+  if (nenSelect) {
+    nenSelect.addEventListener("change", () => {
+      syncNenCategoryFromSelect();
+      scheduleAutoSave();
+    });
+  }
+
+  document.querySelectorAll(".nen-node[data-nen-node]").forEach((node) => {
+    node.addEventListener("click", () => {
+      if (isInspectionReadOnlyActive()) return;
+      const key = node.getAttribute("data-nen-node") || "";
+      if (nenSelect && key) {
+        nenSelect.value = key;
+      }
+      applyNenCategoryTheme(key);
+      scheduleAutoSave();
+    });
+  });
+
+  const addHabBtn = document.getElementById("btn-add-habilidade-nen");
+  if (addHabBtn) {
+    addHabBtn.addEventListener("click", handleAddNenAbility);
+  }
+
+  const exportJsonBtn = document.getElementById("btn-exportar-json");
+  if (exportJsonBtn) {
+    exportJsonBtn.addEventListener("click", handleUserExportJson);
+  }
+
+  const importJsonInput = document.getElementById("input-importar-json");
+  if (importJsonInput) {
+    importJsonInput.addEventListener("change", handleUserImportJsonFile);
+  }
+
+  const slotSelect = document.getElementById("ficha-slot-select");
+  if (slotSelect) {
+    slotSelect.addEventListener("change", (e) => handleSwitchAccountSlot(e.target.value));
+  }
+
+  const newSlotBtn = document.getElementById("btn-nova-ficha-slot");
+  if (newSlotBtn) {
+    newSlotBtn.addEventListener("click", handleCreateNewAccountSlot);
+  }
+
+  const delSlotBtn = document.getElementById("btn-excluir-ficha-slot");
+  if (delSlotBtn) {
+    delSlotBtn.addEventListener("click", handleDeleteCurrentAccountSlot);
+  }
+
+  const lgpdBtn = document.getElementById("lgpd-accept-btn");
+  if (lgpdBtn) {
+    lgpdBtn.addEventListener("click", aceitarLgpdBanner);
+  }
+
+  const footerDetailsBtn = document.getElementById("btn-rodape-detalhes");
+  const footerPanel = document.getElementById("rodape-painel-lgpd");
+  if (footerDetailsBtn && footerPanel) {
+    footerDetailsBtn.addEventListener("click", () => {
+      const nextHidden = !footerPanel.hidden;
+      footerPanel.hidden = nextHidden;
+      footerDetailsBtn.setAttribute("aria-expanded", nextHidden ? "false" : "true");
+    });
+  }
+
+  const mainEl = document.querySelector("main.container");
+  if (mainEl) {
+    mainEl.addEventListener("input", (e) => {
+      const target = e.target;
+      if (!target || target.closest("#login-firebase")) return;
+      recalculateSkillsTable();
+      scheduleAutoSave();
+    });
+
+    mainEl.addEventListener("change", (e) => {
+      const target = e.target;
+      if (!target || target.closest("#login-firebase")) return;
+      recalculateSkillsTable();
+      scheduleAutoSave();
+    });
+  }
+
+  document.querySelectorAll(".abas .aba-btn[data-secao-alvo]").forEach((link) => {
+    link.addEventListener("click", () => {
+      const targetId = link.dataset.secaoAlvo || "dados-agente";
+      setActiveSectionIndicator(targetId);
+    });
+  });
+
+  window.addEventListener("scroll", scheduleScrollSectionSync, { passive: true });
+  window.addEventListener("resize", scheduleScrollSectionSync, { passive: true });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  initConsoleSecurityGuard();
+  hardenExternalLinks();
+  setLgpdBannerVisibility(hasCookieConsent());
+  renderGuildShopCatalog();
+  syncSlotDropdownUI();
+  updatePasswordVisibilityUI();
+  updateAuthModeUI();
+  updateAuthUI();
+  updateScreenAccess();
+  bindUIEvents();
+  initFirebase();
+});
