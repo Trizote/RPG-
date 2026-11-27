@@ -7,7 +7,8 @@
      Dinâmicas do Comando Abaixo, Todos os Comandos Ativos, Mensagem até 24h
      ou Tempo Indeterminado no Painel Mestre (Normal/Urgente) para UID ou
      TODOS os jogadores, Admin Temporário até 24h ou Tempo Indeterminado no
-     Painel Mestre (sem adicionar/remover admin), Aviso de Atualização 100%
+     Painel Mestre (sem adicionar/remover admin), Bloqueio de Acesso à Ficha
+     do Admin Master para outros usuários, Aviso de Atualização 100%
      Funcional na Conta Master com Leitura Automática do que foi Adicionado,
      Somente Leitura, UIDs Recentes, Ajuste Rápido, Modelos Base, Diff,
      Backup JSON e Log
@@ -55,7 +56,7 @@ const MAX_ADMIN_LOGS = 25;
 
 const ADMIN_COMMAND_CATALOG = Object.freeze([
   { cmd: "/admin", syntax: "/admin <UID> [min|indeterminado]", desc: "Dar admin até 24h (ou indeterminado no master; sem add/remover admin)", masterOnly: true },
-  { cmd: "/uid", syntax: "/uid <UID>", desc: "Carregar ou trocar UID alvo" },
+  { cmd: "/uid", syntax: "/uid <UID>", desc: "Carregar ou trocar UID alvo", masterOnly: true },
   { cmd: "/minha", syntax: "/minha", desc: "Voltar para a própria ficha" },
   { cmd: "/recado", syntax: "/recado <min|indeterminado> <texto>", desc: "Enviar recado normal para UID" },
   { cmd: "/urgente", syntax: "/urgente <min|indeterminado> <texto>", desc: "Enviar recado urgente para UID" },
@@ -1448,11 +1449,15 @@ async function loadGlobalBroadcastNotice() {
 
 /* --------------------------------------------------------------------------
    Helpers da Conta Admin: Prompt, Funções Abaixo do Comando e
-   Área de Todos os Comandos Ativos
+   Área de Todos os Comandos Ativos (com bloqueio da ficha do Admin Master)
    -------------------------------------------------------------------------- */
 function sanitizeTargetUid(rawUid) {
   const clean = sanitizeSingleLine(String(rawUid ?? ""), 128);
-  return UID_REGEX.test(clean) ? clean : "";
+  if (!UID_REGEX.test(clean)) return "";
+  if (clean === ADMIN_UID && state.user?.uid !== ADMIN_UID) {
+    return "";
+  }
+  return clean;
 }
 
 function getAvailableCommandsForCurrentUser() {
@@ -1519,7 +1524,7 @@ function computeSheetDiffList() {
 
 function saveAdminTargetUidToStorage(uid) {
   try {
-    if (uid) {
+    if (uid && isMasterAdmin()) {
       sessionStorage.setItem(STORAGE_KEYS.ADMIN_TARGET_UID, uid);
     } else {
       sessionStorage.removeItem(STORAGE_KEYS.ADMIN_TARGET_UID);
@@ -1530,6 +1535,7 @@ function saveAdminTargetUidToStorage(uid) {
 }
 
 function loadAdminTargetUidFromStorage() {
+  if (!isMasterAdmin()) return "";
   try {
     const raw = sessionStorage.getItem(STORAGE_KEYS.ADMIN_TARGET_UID) || "";
     return sanitizeTargetUid(raw);
@@ -1539,6 +1545,7 @@ function loadAdminTargetUidFromStorage() {
 }
 
 function recordRecentAdminUid(uid) {
+  if (!isMasterAdmin()) return;
   const clean = sanitizeTargetUid(uid);
   if (!clean) return;
   const next = [clean, ...state.adminRecentUids.filter((item) => item !== clean)].slice(0, MAX_RECENT_UIDS);
@@ -1554,6 +1561,7 @@ function recordRecentAdminUid(uid) {
 }
 
 function loadRecentAdminUidsFromStorage() {
+  if (!isMasterAdmin()) return [];
   try {
     const raw = sessionStorage.getItem(STORAGE_KEYS.ADMIN_RECENT_UIDS);
     if (!raw) return [];
@@ -1671,7 +1679,7 @@ function renderActiveCommandsStrip() {
   const header = document.createElement("div");
   header.textContent = isMasterAdmin()
     ? "Comandos ativos (clique para carregar no prompt e exibir as funções abaixo):"
-    : "Comandos ativos do admin temporário (sem permissão para adicionar ou remover admin):";
+    : "Comandos ativos do admin temporário (sem acesso à ficha do master e sem adicionar/remover admin):";
   header.style.cssText = "font-size: 12px; color: #ffd966; font-weight: 600; margin-bottom: 6px;";
   strip.appendChild(header);
 
@@ -1728,12 +1736,14 @@ function renderAdminCommandFunctionsBelow() {
     return;
   }
 
-  if (cmd === "/admin" && !isMasterAdmin()) {
+  if ((cmd === "/admin" || cmd === "/uid") && !isMasterAdmin()) {
     box.hidden = false;
     box.replaceChildren();
     const denied = document.createElement("div");
     denied.textContent =
-      "Administrador temporário não pode adicionar ou remover administradores.";
+      cmd === "/uid"
+        ? "Apenas o administrador master pode carregar fichas de outros UIDs."
+        : "Administrador temporário não pode adicionar ou remover administradores.";
     denied.style.cssText = "font-size: 12px; color: #ff8a80; font-weight: 600;";
     box.appendChild(denied);
     return;
@@ -1827,13 +1837,13 @@ function renderAdminCommandFunctionsBelow() {
 
     const note = document.createElement("div");
     note.textContent =
-      "No painel mestre você pode escolher um tempo de até 24h ou ativar 'Tempo indeterminado'. O administrador temporário não terá opção para adicionar ou remover administradores.";
+      "No painel mestre você pode escolher um tempo de até 24h ou ativar 'Tempo indeterminado'. O administrador temporário não poderá ver a ficha do master nem adicionar/remover administradores.";
     note.style.cssText = "margin-top: 7px; font-size: 11px; color: #b8c2cc;";
     box.appendChild(note);
     return;
   }
 
-  if (cmd === "/uid" || cmd === "/minha") {
+  if (cmd === "/uid" && isMasterAdmin()) {
     const row = document.createElement("div");
     row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
 
@@ -1887,6 +1897,21 @@ function renderAdminCommandFunctionsBelow() {
     return;
   }
 
+  if (cmd === "/minha") {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+    const selfBtn = document.createElement("button");
+    selfBtn.type = "button";
+    selfBtn.textContent = "Carregar minha própria ficha";
+    selfBtn.style.cssText = "padding: 7px 12px; border-radius: 7px; border: none; background: #2b8a6e; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+    selfBtn.addEventListener("click", handleAdminReturnToOwnSheet);
+
+    row.appendChild(selfBtn);
+    box.appendChild(row);
+    return;
+  }
+
   if (
     cmd === "/recado" ||
     cmd === "/urgente" ||
@@ -1910,7 +1935,7 @@ function renderAdminCommandFunctionsBelow() {
     msgInput.value = state.adminDraftNoticeText || "";
     msgInput.placeholder = isAllCmd
       ? "Mensagem para TODOS os jogadores..."
-      : "Escreva a mensagem para o UID alvo...";
+      : "Escreva a mensagem...";
     msgInput.style.cssText = "flex: 1 1 200px; padding: 7px 10px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
     msgInput.addEventListener("input", () => {
       state.adminDraftNoticeText = msgInput.value;
@@ -1919,7 +1944,7 @@ function renderAdminCommandFunctionsBelow() {
     const scopeSelect = document.createElement("select");
     scopeSelect.style.cssText = "padding: 7px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #8ce0f0; font-size: 12px; font-weight: 600;";
     [
-      { value: "uid", label: "UID alvo" },
+      { value: "uid", label: isMasterAdmin() ? "UID alvo" : "Minha ficha" },
       { value: "all", label: "TODOS os jogadores" }
     ].forEach((sc) => {
       const opt = document.createElement("option");
@@ -2025,8 +2050,8 @@ function renderAdminCommandFunctionsBelow() {
 
     const uidLine = document.createElement("div");
     uidLine.textContent = uidActive
-      ? `Recado no UID alvo ${uidActive.priority === "urgent" ? "[URGENTE]" : "[Normal]"} (${formatRemainingTimeLabel(uidActive.expiresAt, uidActive.indefinite)}): "${uidActive.msg}"`
-      : "Recado no UID alvo: nenhum ativo.";
+      ? `Recado no UID ativo ${uidActive.priority === "urgent" ? "[URGENTE]" : "[Normal]"} (${formatRemainingTimeLabel(uidActive.expiresAt, uidActive.indefinite)}): "${uidActive.msg}"`
+      : "Recado no UID ativo: nenhum.";
 
     const globalLine = document.createElement("div");
     globalLine.textContent = globalActive
@@ -2255,7 +2280,7 @@ function updateAdminBarUI() {
     const modeLabel = state.adminReadOnly ? " · SOMENTE LEITURA" : " · Edição ativa";
     if (hasActiveTempAdminRole()) {
       const rem = formatRemainingTimeLabel(state.tempAdminGrant.expiresAt, state.tempAdminGrant.indefinite);
-      activeBadge.textContent = `Admin Temporário (${rem}, sem add/remover admin)${modeLabel}`;
+      activeBadge.textContent = `Admin Temporário (${rem}, ficha master bloqueada)${modeLabel}`;
     } else if (state.adminTargetUid && state.adminTargetUid !== state.user.uid) {
       activeBadge.textContent = `Alvo: ${state.adminTargetUid}${modeLabel}`;
     } else {
@@ -2480,10 +2505,10 @@ async function handleAdminGrantTempRole(overrideData) {
     appendAdminLog(`Admin concedido (${durationText}) ao UID ${targetUid}`);
     renderAdminCommandFunctionsBelow();
     await recordMasterSuccessUpdate(
-      `Admin (${durationText}) concedido ao UID ${targetUid} (sem permissão para adicionar ou remover admin)`
+      `Admin (${durationText}) concedido ao UID ${targetUid} (sem acesso à ficha master e sem adicionar/remover admin)`
     );
     setStatusBanner(
-      `Função de admin concedida ao UID ${targetUid} por ${durationText} (sem poder adicionar/remover admin).`,
+      `Função de admin concedida ao UID ${targetUid} por ${durationText} (sem acesso à ficha master e sem poder adicionar/remover admin).`,
       "success"
     );
   } catch (err) {
@@ -2540,9 +2565,18 @@ async function handleAdminPromptSubmit(event) {
     return;
   }
 
-  if (cmd === "/uid" && parts[1]) {
-    state.adminDraftUid = parts[1];
-    await handleAdminLoadTargetUid(parts[1]);
+  if (cmd === "/uid") {
+    if (!isMasterAdmin()) {
+      setStatusBanner("Apenas o administrador master pode carregar fichas de outros UIDs.", "error");
+      renderAdminCommandFunctionsBelow();
+      return;
+    }
+    if (parts[1]) {
+      state.adminDraftUid = parts[1];
+      await handleAdminLoadTargetUid(parts[1]);
+      return;
+    }
+    renderAdminCommandFunctionsBelow();
     return;
   }
 
@@ -2768,7 +2802,16 @@ async function handleAdminLoadTargetUid(rawUidOverride) {
     return;
   }
 
-  const uid = sanitizeTargetUid(rawUidOverride !== undefined ? rawUidOverride : state.adminDraftUid);
+  const rawCleaned = sanitizeSingleLine(
+    String(rawUidOverride !== undefined ? rawUidOverride : state.adminDraftUid),
+    128
+  );
+  if (rawCleaned === ADMIN_UID && state.user?.uid !== ADMIN_UID) {
+    setStatusBanner("A ficha do administrador master não pode ser acessada por este usuário.", "error");
+    return;
+  }
+
+  const uid = sanitizeTargetUid(rawCleaned);
   if (!uid) {
     setStatusBanner("Informe um UID válido para carregar a ficha do jogador.", "warning");
     return;
@@ -2884,7 +2927,7 @@ async function handleAdminSendNotice(overrideData) {
       : state.user.uid
   );
   if (!targetUid) {
-    setStatusBanner("Carregue ou informe um UID válido para enviar a mensagem.", "warning");
+    setStatusBanner("Informe um UID válido para enviar a mensagem.", "warning");
     return;
   }
 
@@ -3507,6 +3550,12 @@ function buildSanitizedCloudPayload() {
 }
 
 function applySheetData(data, expectedUidForGrant = "") {
+  if (expectedUidForGrant === ADMIN_UID && state.user?.uid !== ADMIN_UID) {
+    resetSheetFieldsToDefault();
+    updateAdminBarUI();
+    return;
+  }
+
   if (!data || typeof data !== "object" || !data.fields || typeof data.fields !== "object") {
     state.activeNotice = null;
     state.tempAdminGrant = null;
@@ -3838,6 +3887,14 @@ async function initFirebase() {
 
 async function loadFromFirestore(uid) {
   if (!state.firebaseReady || !state.db || !uid) return;
+
+  if (uid === ADMIN_UID && state.user?.uid !== ADMIN_UID) {
+    resetSheetFieldsToDefault();
+    updateAdminBarUI();
+    setStatusBanner("Acesso negado: a ficha do administrador master é privada.", "error");
+    return;
+  }
+
   const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
 
   try {
@@ -3854,7 +3911,7 @@ async function loadFromFirestore(uid) {
         isMasterAdmin() && uid !== state.user?.uid
           ? `Ficha carregada do UID alvo (${uid}).`
           : hasActiveTempAdminRole()
-            ? "Ficha carregada (Admin Temporário ativo, sem poder adicionar/remover admin)."
+            ? "Ficha carregada (Admin Temporário ativo, ficha master privada)."
             : "Ficha carregada do banco de dados Firebase.",
         "success"
       );
@@ -3897,6 +3954,9 @@ async function saveToFirestore(uid, data) {
   if (!state.firebaseReady || !state.db || !uid || typeof uid !== "string") {
     return false;
   }
+  if (uid === ADMIN_UID && state.user?.uid !== ADMIN_UID) {
+    return false;
+  }
   const { doc, setDoc } = state.firebaseModules.firestoreMod;
   const docRef = doc(state.db, FIRESTORE_COLLECTION, uid);
   const safeData = data && data.fields ? data : buildSanitizedCloudPayload();
@@ -3919,6 +3979,11 @@ async function handleClearSheetData(event) {
   }
 
   const targetUid = getActiveTargetUid();
+  if (targetUid === ADMIN_UID && state.user?.uid !== ADMIN_UID) {
+    setStatusBanner("Acesso negado: a ficha do administrador master é privada.", "error");
+    return;
+  }
+
   const isRemoteTarget = Boolean(isMasterAdmin() && targetUid && targetUid !== state.user?.uid);
 
   state.activeNotice = null;
@@ -4126,6 +4191,11 @@ async function persistSheet(forceWrite = false, masterSummaryLabel = "") {
     }
 
     const targetUid = getActiveTargetUid();
+    if (targetUid === ADMIN_UID && state.user?.uid !== ADMIN_UID) {
+      setStatusBanner("Acesso negado: a ficha do administrador master é privada.", "error");
+      return;
+    }
+
     const isRemoteTarget = Boolean(isMasterAdmin() && targetUid && targetUid !== state.user?.uid);
 
     if (!isRemoteTarget) {
@@ -4391,7 +4461,7 @@ function bindEvents() {
   }
 
   if (deleteCancelBtn && deleteConfirmBox) {
-    deleteConfirmBtn.addEventListener("click", () => {
+    deleteCancelBtn.addEventListener("click", () => {
       deleteConfirmBox.hidden = true;
     });
   }
