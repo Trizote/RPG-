@@ -459,6 +459,7 @@ body {
   margin-bottom: 16px;
   box-shadow: var(--sombra-card);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  overflow: visible;
 }
 
 .card:hover {
@@ -489,10 +490,21 @@ input, select, textarea {
   background-color: var(--bg-campo);
   border: 1px solid rgba(140, 224, 240, 0.14);
   color: #ffffff;
-  padding: 7px 10px;
+  padding: 8px 11px;
   border-radius: 7px;
   font-size: 0.9rem;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
+textarea {
+  min-height: 84px;
+  line-height: 1.52;
+  resize: vertical;
+  overflow-y: auto;
 }
 
 input:hover, select:hover, textarea:hover {
@@ -504,6 +516,61 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--ilha-brilho);
   box-shadow: 0 0 0 3px rgba(60, 168, 136, 0.24);
   background-color: #0b1c26;
+}
+
+/* Nota de Atualizações do Site (Topo, todos incluindo Admin, dispensável até nova atualização) */
+.site-release-notes-banner {
+  margin: 0 auto 14px;
+  padding: 13px 16px;
+  border-radius: 11px;
+  border: 1px solid rgba(140, 224, 240, 0.35);
+  border-left: 4px solid var(--destaque-ouro);
+  background: linear-gradient(135deg, rgba(16, 44, 58, 0.98) 0%, rgba(11, 28, 38, 0.99) 100%);
+  color: var(--texto-principal);
+  box-shadow: 0 10px 24px rgba(2, 10, 15, 0.45);
+}
+
+.site-release-notes-banner[hidden] {
+  display: none !important;
+}
+
+.site-release-notes-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.site-release-notes-titulo {
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: var(--destaque-ouro);
+  letter-spacing: 0.3px;
+}
+
+.site-release-notes-meta {
+  font-size: 0.78rem;
+  color: var(--texto-suave);
+}
+
+.site-release-notes-lista {
+  margin: 4px 0 10px 18px;
+  font-size: 0.87rem;
+  color: var(--texto-principal);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.site-release-notes-lista li {
+  margin-bottom: 3px;
+}
+
+.site-release-notes-acoes {
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* Campo de Senha com Botão de Visibilidade */
@@ -551,6 +618,8 @@ input:focus, select:focus, textarea:focus {
   margin-bottom: 16px;
   font-size: 0.9rem;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.38);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .status-banner[hidden] {
@@ -585,6 +654,7 @@ input:focus, select:focus, textarea:focus {
 .auth-usuario {
   font-size: 0.92rem;
   color: var(--texto-principal);
+  word-break: break-word;
 }
 
 /* Barra de Múltiplas Fichas e Backup */
@@ -627,6 +697,8 @@ input:focus, select:focus, textarea:focus {
 .auth-delete-aviso {
   font-size: 0.88rem;
   color: #f9c2c2;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .btn-arkan {
@@ -922,6 +994,8 @@ input:focus, select:focus, textarea:focus {
   color: var(--texto-suave);
   margin-bottom: 10px;
   line-height: 1.52;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .subtitulo-nen {
@@ -944,6 +1018,8 @@ input:focus, select:focus, textarea:focus {
   padding: 9px 12px;
   border-radius: 8px;
   margin-bottom: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* Alerta de Sobrecarga */
@@ -956,6 +1032,8 @@ input:focus, select:focus, textarea:focus {
   border-radius: 8px;
   font-size: 0.82rem;
   margin-bottom: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .alerta-sobrecarga[hidden] {
@@ -1135,24 +1213,40 @@ html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell
 
 .hab-item-info {
   flex: 1 1 200px;
+  min-width: 0;
 }
 
 .hab-item-titulo {
   font-size: 0.9rem;
   font-weight: 700;
   color: #ffffff;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .hab-item-meta {
   font-size: 0.77rem;
   color: var(--nen-destaque);
   margin-top: 2px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .hab-item-desc {
   font-size: 0.82rem;
   color: var(--texto-suave);
   margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.hab-item-feedback {
+  font-size: 0.79rem;
+  font-weight: 600;
+  color: var(--destaque-ouro);
+  margin-top: 5px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .hab-item-acoes {
@@ -1218,14 +1312,16 @@ html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell
 }
 
 .campo-hist {
-  margin-bottom: 11px;
+  margin-bottom: 12px;
+  min-width: 0;
 }
 
 .campo-hist label {
   display: block;
   font-size: 0.84rem;
   color: var(--texto-suave);
-  margin-bottom: 4px;
+  margin-bottom: 5px;
+  font-weight: 600;
 }
 
 .totais-guilda {
@@ -1427,6 +1523,7 @@ html[data-nen-categoria="especializacao"] #tabela-pericias input:not(.total-cell
   #login-firebase,
   #admin-uid-bar,
   #player-admin-notice-banner,
+  #site-release-notes-banner,
   .lgpd-banner,
   .rodape-btn-detalhes,
   .hab-form-grid,

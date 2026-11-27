@@ -10,6 +10,7 @@
    + Alerta de Sobrecarga e redutor automático (-5) nas perícias com (*)
    + Exportar e Importar JSON / Impressão PDF para jogadores e modo offline
    + Loja e Banco da Guilda (Gastar Moedas e catálogo rápido de itens)
+   + Nota de Atualizações para todos (incluindo Admin) com dispensa por versão
    + Modo Administrador por UID (exclusivo)
    Criador: Lucas Ramalho Gavasso Trizote
    ========================================================================== */
@@ -29,7 +30,22 @@ const STORAGE_KEYS = Object.freeze({
   LOCAL_SHEET: "ordem_de_arkan_agente_v1",
   COOKIE_CONSENT: "ordem_de_arkan_lgpd_v1",
   ADMIN_TARGET_UID: "ordem_de_arkan_admin_target_uid_v1",
-  ADMIN_RECENT_UIDS: "ordem_de_arkan_admin_recent_uids_v1"
+  ADMIN_RECENT_UIDS: "ordem_de_arkan_admin_recent_uids_v1",
+  DISMISSED_RELEASE_NOTE: "ordem_de_arkan_dismissed_release_v1"
+});
+
+/* Nota de atualização em linguagem humana (visível para todos, incluindo Admin).
+   Ao alterar o "version" quando lançar uma nova atualização, a nota volta a aparecer
+   para quem dispensou a versão anterior. */
+const SITE_RELEASE_NOTE = Object.freeze({
+  version: "2026-11-27-v2",
+  title: "Novidades da Atualização",
+  subtitle: "Novembro de 2026",
+  items: Object.freeze([
+    "Textos longos em campos e anotações agora aparecem por inteiro sem cortes na tela do celular.",
+    "O botão de usar habilidade agora mostra retorno claro na própria técnica e avisa caso faltem Pontos de Esforço.",
+    "Aviso de atualizações adicionado no topo para todos os jogadores e também para a conta do administrador."
+  ])
 });
 
 const ADMIN_UID = "TcudbnuOMcTySJWhz0JHaNDuNU22";
@@ -240,6 +256,7 @@ const state = {
   activeNotice: null,
   noticeExpiryTimer: null,
   nenAbilities: [],
+  lastAbilityFeedback: createSafeRecord(),
   accountSlots: {
     activeSlotId: "slot-1",
     slots: {
@@ -256,7 +273,7 @@ function createSafeRecord() {
   return Object.create(null);
 }
 
-function sanitizeText(value, maxLength = 500) {
+function sanitizeText(value, maxLength = 5000) {
   if (typeof value !== "string") return "";
   return value
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
@@ -265,7 +282,7 @@ function sanitizeText(value, maxLength = 500) {
     .slice(0, maxLength);
 }
 
-function sanitizeSingleLine(value, maxLength = 140) {
+function sanitizeSingleLine(value, maxLength = 250) {
   return sanitizeText(value, maxLength).replace(/[\r\n]+/g, " ").trim();
 }
 
@@ -306,15 +323,15 @@ function normalizeControlValue(ctrl, rawValue) {
     return normalizeRankValue(rawValue);
   }
   if (ctrl.id === "habilidades-nen-json") {
-    return sanitizeText(String(rawValue ?? "[]"), 15000);
+    return sanitizeText(String(rawValue ?? "[]"), 30000);
   }
   if (ctrl.type === "number") {
     return normalizeNumericValue(ctrl.id || "", rawValue);
   }
   if (ctrl.tagName === "TEXTAREA") {
-    return sanitizeText(String(rawValue ?? ""), 5000);
+    return sanitizeText(String(rawValue ?? ""), 10000);
   }
-  return sanitizeSingleLine(String(rawValue ?? ""), 250);
+  return sanitizeSingleLine(String(rawValue ?? ""), 400);
 }
 
 function renderSafeText(element, text, maxLength = 220) {
@@ -353,6 +370,100 @@ function initConsoleSecurityGuard() {
   } catch {
     // Ignora caso console esteja restrito
   }
+}
+
+/* --------------------------------------------------------------------------
+   Nota de Atualizações do Site (Para todos, incluindo Admin, dispensável)
+   -------------------------------------------------------------------------- */
+function isCurrentReleaseNoteDismissed() {
+  try {
+    const savedVer = localStorage.getItem(STORAGE_KEYS.DISMISSED_RELEASE_NOTE) || "";
+    return savedVer === SITE_RELEASE_NOTE.version;
+  } catch {
+    return false;
+  }
+}
+
+function dismissCurrentReleaseNote() {
+  try {
+    localStorage.setItem(STORAGE_KEYS.DISMISSED_RELEASE_NOTE, SITE_RELEASE_NOTE.version);
+  } catch {
+    // Ignora falha de armazenamento
+  }
+  renderSiteReleaseNotesBanner();
+}
+
+function ensureSiteReleaseNotesBannerElement() {
+  if (document.getElementById("site-release-notes-banner")) return;
+  const appFicha = document.getElementById("app-ficha");
+  const mainEl = document.querySelector("main.container");
+  const anchorParent = mainEl && mainEl.parentNode ? mainEl.parentNode : appFicha;
+  if (!anchorParent) return;
+
+  const banner = document.createElement("aside");
+  banner.id = "site-release-notes-banner";
+  banner.className = "site-release-notes-banner";
+  banner.hidden = true;
+  banner.setAttribute("role", "region");
+  banner.setAttribute("aria-label", "Nota de atualizações do site");
+
+  if (mainEl && mainEl.parentNode === anchorParent) {
+    anchorParent.insertBefore(banner, mainEl);
+  } else {
+    anchorParent.appendChild(banner);
+  }
+}
+
+function renderSiteReleaseNotesBanner() {
+  ensureSiteReleaseNotesBannerElement();
+  const banner = document.getElementById("site-release-notes-banner");
+  if (!banner) return;
+
+  const hasSession = Boolean(state.user) || Boolean(state.offlineMode);
+  if (!hasSession || isCurrentReleaseNoteDismissed()) {
+    banner.hidden = true;
+    return;
+  }
+
+  banner.innerHTML = "";
+
+  const topRow = document.createElement("div");
+  topRow.className = "site-release-notes-top";
+
+  const titleEl = document.createElement("strong");
+  titleEl.className = "site-release-notes-titulo";
+  titleEl.textContent = SITE_RELEASE_NOTE.title;
+
+  const metaEl = document.createElement("span");
+  metaEl.className = "site-release-notes-meta";
+  metaEl.textContent = SITE_RELEASE_NOTE.subtitle;
+
+  topRow.appendChild(titleEl);
+  topRow.appendChild(metaEl);
+
+  const ul = document.createElement("ul");
+  ul.className = "site-release-notes-lista";
+  SITE_RELEASE_NOTE.items.forEach((txt) => {
+    const li = document.createElement("li");
+    li.textContent = txt;
+    ul.appendChild(li);
+  });
+
+  const actionsRow = document.createElement("div");
+  actionsRow.className = "site-release-notes-acoes";
+
+  const dismissBtn = document.createElement("button");
+  dismissBtn.type = "button";
+  dismissBtn.className = "btn-arkan btn-azul btn-mini";
+  dismissBtn.textContent = "Dispensar aviso";
+  dismissBtn.addEventListener("click", dismissCurrentReleaseNote);
+
+  actionsRow.appendChild(dismissBtn);
+
+  banner.appendChild(topRow);
+  banner.appendChild(ul);
+  banner.appendChild(actionsRow);
+  banner.hidden = false;
 }
 
 /* --------------------------------------------------------------------------
@@ -443,10 +554,10 @@ function parseAbilitiesFromHiddenInput() {
       .filter((item) => item && typeof item === "object")
       .map((item, idx) => ({
         id: sanitizeSingleLine(String(item.id || `hab-${idx}-${Date.now()}`), 48),
-        name: sanitizeSingleLine(String(item.name || "Técnica"), 80),
-        type: sanitizeSingleLine(String(item.type || "Princípio Básico"), 40),
+        name: sanitizeSingleLine(String(item.name || "Técnica"), 120),
+        type: sanitizeSingleLine(String(item.type || "Princípio Básico"), 60),
         cost: Math.min(999, Math.max(0, Math.trunc(Number(item.cost) || 0))),
-        desc: sanitizeSingleLine(String(item.desc || ""), 220)
+        desc: sanitizeText(String(item.desc || ""), 600)
       }));
   } catch {
     state.nenAbilities = [];
@@ -461,7 +572,16 @@ function syncAbilitiesToHiddenInput() {
 }
 
 function useNenAbility(ability) {
-  if (!ability || isInspectionReadOnlyActive()) return;
+  if (!ability) return;
+
+  if (isInspectionReadOnlyActive()) {
+    const msg = "Modo somente leitura ativo: desative para gastar PE.";
+    state.lastAbilityFeedback[ability.id] = msg;
+    renderNenAbilitiesList();
+    setStatusBanner(msg, "warning");
+    return;
+  }
+
   const peAtualEl = document.getElementById("pe-atual");
   const peGastoEl = document.getElementById("pe-gasto");
   if (!peAtualEl) return;
@@ -470,6 +590,9 @@ function useNenAbility(ability) {
   const cost = Math.max(0, Math.trunc(Number(ability.cost) || 0));
 
   if (currentPe < cost) {
+    const msg = `Sem PE suficiente (PE atual: ${currentPe} · custo: ${cost} PE). Aumente seu PE atual em Dados do Agente.`;
+    state.lastAbilityFeedback[ability.id] = msg;
+    renderNenAbilitiesList();
     setStatusBanner(
       `PE insuficiente para usar "${ability.name}" (custo: ${cost} PE · atual: ${currentPe} PE).`,
       "warning"
@@ -477,14 +600,19 @@ function useNenAbility(ability) {
     return;
   }
 
-  peAtualEl.value = String(currentPe - cost);
+  const nextPe = currentPe - cost;
+  peAtualEl.value = String(nextPe);
   if (peGastoEl) {
     const spentPe = Math.trunc(Number(peGastoEl.value) || 0);
     peGastoEl.value = String(spentPe + cost);
   }
 
+  const msg = `Usada agora (-${cost} PE). PE restante: ${nextPe}.`;
+  state.lastAbilityFeedback[ability.id] = msg;
+  renderNenAbilitiesList();
+
   setStatusBanner(
-    `Habilidade "${ability.name}" ativada (-${cost} PE). Restante: ${currentPe - cost} PE.`,
+    `Habilidade "${ability.name}" ativada (-${cost} PE). Restante: ${nextPe} PE.`,
     "success"
   );
   scheduleAutoSave();
@@ -528,6 +656,13 @@ function renderNenAbilitiesList() {
       info.appendChild(desc);
     }
 
+    if (Object.prototype.hasOwnProperty.call(state.lastAbilityFeedback, hab.id) && state.lastAbilityFeedback[hab.id]) {
+      const fb = document.createElement("div");
+      fb.className = "hab-item-feedback";
+      fb.textContent = state.lastAbilityFeedback[hab.id];
+      info.appendChild(fb);
+    }
+
     const actions = document.createElement("div");
     actions.className = "hab-item-acoes";
 
@@ -544,6 +679,7 @@ function renderNenAbilitiesList() {
     delBtn.addEventListener("click", () => {
       if (isInspectionReadOnlyActive()) return;
       state.nenAbilities = state.nenAbilities.filter((item) => item.id !== hab.id);
+      delete state.lastAbilityFeedback[hab.id];
       syncAbilitiesToHiddenInput();
       renderNenAbilitiesList();
       scheduleAutoSave();
@@ -565,15 +701,15 @@ function handleAddNenAbility() {
   const costEl = document.getElementById("hab-custo-input");
   const descEl = document.getElementById("hab-desc-input");
 
-  const name = sanitizeSingleLine(nameEl ? nameEl.value : "", 80);
+  const name = sanitizeSingleLine(nameEl ? nameEl.value : "", 120);
   if (!name) {
     setStatusBanner("Informe o nome da técnica ou Hatsu antes de adicionar.", "warning");
     return;
   }
 
-  const type = sanitizeSingleLine(typeEl ? typeEl.value : "Princípio Básico", 40);
+  const type = sanitizeSingleLine(typeEl ? typeEl.value : "Princípio Básico", 60);
   const cost = Math.min(999, Math.max(0, Math.trunc(Number(costEl ? costEl.value : 0) || 0)));
-  const desc = sanitizeSingleLine(descEl ? descEl.value : "", 220);
+  const desc = sanitizeText(descEl ? descEl.value : "", 600);
 
   state.nenAbilities.push({
     id: `hab-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -710,7 +846,7 @@ function handleUserImportJsonFile(event) {
       Object.entries(parsed.fields).slice(0, 1500).forEach(([k, v]) => {
         if (!isValidFieldKey(k) || k === ADMIN_NOTICE_FIELD_KEY || k === MULTI_SLOTS_FIELD_KEY) return;
         if (typeof v === "boolean") safeFields[k] = v;
-        else if (typeof v === "string" || typeof v === "number") safeFields[k] = String(v).slice(0, 5000);
+        else if (typeof v === "string" || typeof v === "number") safeFields[k] = String(v).slice(0, 10000);
       });
 
       applySheetData({ fields: safeFields }, true);
@@ -893,10 +1029,8 @@ async function handleSwitchAccountSlot(nextSlotId) {
     state.saveTimer = null;
   }
 
-  // 1. Guarda primeiro a ficha atual inteira no slot antigo antes de zerar a tela
   saveCurrentFormIntoActiveSlotMemory();
 
-  // 2. Troca o slot ativo e carrega os dados dele
   state.accountSlots.activeSlotId = nextSlotId;
   const targetSlot = state.accountSlots.slots[nextSlotId];
 
@@ -921,10 +1055,8 @@ async function handleCreateNewAccountSlot() {
     state.saveTimer = null;
   }
 
-  // 1. Captura e congela a ficha atual no slot antigo ANTES de qualquer limpeza de tela
   saveCurrentFormIntoActiveSlotMemory();
 
-  // 2. Cria o novo slot e troca o ponteiro activeSlotId ANTES de chamar resetSheetFieldsToDefault()
   const newId = `slot-${Date.now()}`;
   const label = `Novo Agente #${existingKeys.length + 1}`;
   state.accountSlots.activeSlotId = newId;
@@ -933,7 +1065,6 @@ async function handleCreateNewAccountSlot() {
   const nomeEl = document.getElementById("nome");
   if (nomeEl) nomeEl.value = label;
 
-  // 3. Salva a nova ficha vazia no novo slot e sincroniza ambos na nuvem
   saveCurrentFormIntoActiveSlotMemory();
   state.lastSavedSnapshot = "";
   setStatusBanner(`Nova ficha "${label}" criada. A ficha anterior continua salva no seletor acima.`, "success");
@@ -1166,9 +1297,12 @@ function ensurePlayerNoticeBannerElement() {
     "color: #f4f6f8"
   ].join(";");
 
+  const releaseBanner = document.getElementById("site-release-notes-banner");
   const adminBar = document.getElementById("admin-uid-bar");
   if (adminBar && adminBar.parentNode === anchorParent) {
     anchorParent.insertBefore(box, adminBar.nextSibling);
+  } else if (releaseBanner && releaseBanner.parentNode === anchorParent) {
+    anchorParent.insertBefore(box, releaseBanner.nextSibling);
   } else if (mainEl && mainEl.parentNode === anchorParent) {
     anchorParent.insertBefore(box, mainEl);
   } else {
@@ -1927,7 +2061,10 @@ function ensureAdminBarElement() {
   bar.appendChild(allCmdsBox);
   bar.appendChild(functionsBelowPanel);
 
-  if (mainEl && mainEl.parentNode === anchorParent) {
+  const releaseBanner = document.getElementById("site-release-notes-banner");
+  if (releaseBanner && releaseBanner.parentNode === anchorParent) {
+    anchorParent.insertBefore(bar, releaseBanner.nextSibling);
+  } else if (mainEl && mainEl.parentNode === anchorParent) {
     anchorParent.insertBefore(bar, mainEl);
   } else {
     anchorParent.appendChild(bar);
@@ -2086,7 +2223,7 @@ async function handleAdminImportJson(rawJsonText) {
     Object.entries(parsed.fields).slice(0, 1500).forEach(([k, v]) => {
       if (!isValidFieldKey(k)) return;
       if (typeof v === "boolean") safeFields[k] = v;
-      else if (typeof v === "string" || typeof v === "number") safeFields[k] = String(v).slice(0, 5000);
+      else if (typeof v === "string" || typeof v === "number") safeFields[k] = String(v).slice(0, 10000);
     });
 
     applySheetData({ fields: safeFields }, true);
@@ -2466,7 +2603,7 @@ function syncNenCategoryFromSelect() {
 function setStatusBanner(message, type = "info") {
   const banner = document.getElementById("status-banner");
   if (!banner) return;
-  const cleanMessage = sanitizeSingleLine(message, 220);
+  const cleanMessage = sanitizeSingleLine(message, 260);
   const allowedTypes = ["info", "success", "warning", "error"];
   banner.textContent = cleanMessage;
   banner.dataset.statusType = allowedTypes.includes(type) ? type : "info";
@@ -2606,6 +2743,7 @@ function updateScreenAccess() {
     appFicha.hidden = !hasSession;
   }
 
+  renderSiteReleaseNotesBanner();
   updateAdminBarUI();
   renderPlayerNoticeBanner();
 
@@ -2750,12 +2888,12 @@ function buildSanitizedCloudPayload() {
       } else if (typeof val === "string") {
         cleanFields[key] =
           key === "id:habilidades-nen-json"
-            ? sanitizeText(val, 15000)
+            ? sanitizeText(val, 30000)
             : key.startsWith("id:anotacoes") ||
               key.startsWith("id:hist-") ||
               key.startsWith("id:proficiencias")
-              ? sanitizeText(val, 5000)
-              : sanitizeSingleLine(val, 250);
+              ? sanitizeText(val, 10000)
+              : sanitizeSingleLine(val, 400);
       }
     }
   }
@@ -2801,7 +2939,7 @@ function hydrateAccountSlotsFromFields(fieldsObj) {
       Object.entries(slotVal.fields).slice(0, 1500).forEach(([fk, fv]) => {
         if (!isValidFieldKey(fk) || fk === ADMIN_NOTICE_FIELD_KEY || fk === MULTI_SLOTS_FIELD_KEY) return;
         if (typeof fv === "boolean") cleanSlotFields[fk] = fv;
-        else if (typeof fv === "string" || typeof fv === "number") cleanSlotFields[fk] = String(fv).slice(0, 15000);
+        else if (typeof fv === "string" || typeof fv === "number") cleanSlotFields[fk] = String(fv).slice(0, 30000);
       });
 
       const slotName =
@@ -2838,6 +2976,7 @@ function applySheetData(data, skipSlotHydration = false) {
   if (!data || typeof data !== "object" || !data.fields || typeof data.fields !== "object") {
     state.activeNotice = null;
     state.nenAbilities = [];
+    state.lastAbilityFeedback = createSafeRecord();
     syncAbilitiesToHiddenInput();
     renderNenAbilitiesList();
     scheduleNoticeExpiryCheck();
@@ -2938,6 +3077,7 @@ function resetSheetFieldsToDefault() {
   });
 
   state.nenAbilities = [];
+  state.lastAbilityFeedback = createSafeRecord();
   renderNenAbilitiesList();
   recalculateSkillsTable();
   state.lastSavedSnapshot = "";
