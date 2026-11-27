@@ -7,11 +7,14 @@
      Dinâmicas do Comando Abaixo, Todos os Comandos Ativos, Mensagem até 24h
      ou Tempo Indeterminado no Painel Mestre (Normal/Urgente) para UID ou
      TODOS os jogadores, Admin Temporário até 24h ou Tempo Indeterminado no
-     Painel Mestre (sem adicionar/remover admin), Bloqueio de Acesso à Ficha
-     do Admin Master para outros usuários, Aviso de Atualização 100%
-     Funcional na Conta Master com Leitura Automática do que foi Adicionado,
-     Somente Leitura, UIDs Recentes, Ajuste Rápido, Modelos Base, Diff,
-     Backup JSON e Log
+     Painel Mestre (sem adicionar/remover admin), Comando /removeradmin para
+     revogar admin temporário/indeterminado, Funções do Painel do Mestre
+     (/equipe, /consulta, /rolagens, /recompensa, /combate, /auditoria),
+     Monitoramento em Tempo Real e Histórico de Auditoria Anti-Adulteração,
+     Bloqueio de Acesso à Ficha do Admin Master para outros usuários, Aviso de
+     Atualização 100% Funcional na Conta Master com Leitura Automática do que
+     foi Adicionado, Somente Leitura, UIDs Recentes, Ajuste Rápido, Modelos
+     Base, Diff, Backup JSON e Log
    + Exclusão de ficha e exclusão de conta
    + Sincronização precisa das seções no topo conforme a rolagem
    + Cores dinâmicas conforme a Categoria Principal de Afinidade de Nen
@@ -47,17 +50,28 @@ const UID_REGEX = /^[a-zA-Z0-9_-]{10,128}$/;
 const ADMIN_NOTICE_FIELD_KEY = "id:admin_recado_payload";
 const TEMP_ADMIN_GRANT_FIELD_KEY = "id:admin_temp_grant_payload";
 const MASTER_UPDATE_LOG_FIELD_KEY = "id:master_update_log_payload";
+const AUDIT_HISTORY_FIELD_KEY = "id:audit_history_payload";
 const RELEASE_MANIFEST_URL = "./release-manifest.json";
 const MAX_NOTICE_HOURS = 24;
 const MAX_NOTICE_MINUTES = MAX_NOTICE_HOURS * 60;
 const MAX_TEMP_ADMIN_MINUTES = MAX_NOTICE_HOURS * 60;
 const MAX_RECENT_UIDS = 6;
-const MAX_ADMIN_LOGS = 25;
+const MAX_ADMIN_LOGS = 30;
+const MAX_ROLL_FEED = 30;
+const MAX_AUDIT_ENTRIES = 60;
+const MAX_AUDIT_PAYLOAD_CHARS = 4800;
 
 const ADMIN_COMMAND_CATALOG = Object.freeze([
-  { cmd: "/admin", syntax: "/admin <UID> [min|indeterminado]", desc: "Dar admin até 24h (ou indeterminado no master; sem add/remover admin)", masterOnly: true },
-  { cmd: "/uid", syntax: "/uid <UID>", desc: "Carregar ou trocar UID alvo", masterOnly: true },
+  { cmd: "/admin", syntax: "/admin <UID> [min|indeterminado]", desc: "Dar admin até 24h ou indeterminado (sem add/remover admin)", masterOnly: true },
+  { cmd: "/removeradmin", syntax: "/removeradmin <UID>", desc: "Remover administrador temporário ou indeterminado", masterOnly: true },
+  { cmd: "/uid", syntax: "/uid <UID>", desc: "Carregar ficha de jogador por UID (bloqueia ficha master)" },
   { cmd: "/minha", syntax: "/minha", desc: "Voltar para a própria ficha" },
+  { cmd: "/auditoria", syntax: "/auditoria [UID]", desc: "Ver em tempo real o que cada jogador alterou ou adicionou" },
+  { cmd: "/equipe", syntax: "/equipe", desc: "Visão geral da equipe (Vida, Sanidade, Medo e Esforço)" },
+  { cmd: "/consulta", syntax: "/consulta <UID>", desc: "Consulta rápida de Percepção, Intuição e Nen" },
+  { cmd: "/rolagens", syntax: "/rolagens [agente | perícia | valor]", desc: "Feed ao vivo e registro de rolagens da mesa" },
+  { cmd: "/recompensa", syntax: "/recompensa", desc: "Enviar XP, Moedas ou Itens/Equipamentos ao UID alvo" },
+  { cmd: "/combate", syntax: "/combate", desc: "Organizar ordem de turnos e iniciativa da cena" },
   { cmd: "/recado", syntax: "/recado <min|indeterminado> <texto>", desc: "Enviar recado normal para UID" },
   { cmd: "/urgente", syntax: "/urgente <min|indeterminado> <texto>", desc: "Enviar recado urgente para UID" },
   { cmd: "/todos", syntax: "/todos <min|indeterminado> <texto>", desc: "Enviar mensagem normal para TODOS os jogadores" },
@@ -225,6 +239,7 @@ const state = {
   adminAllCommandsActive: false,
   adminDraftUid: "",
   adminDraftTempAdminUid: "",
+  adminDraftRevokeAdminUid: "",
   adminDraftTempAdminMinutes: MAX_TEMP_ADMIN_MINUTES,
   adminDraftTempAdminIndefinite: false,
   adminDraftNoticeText: "",
@@ -238,6 +253,20 @@ const state = {
   adminDraftTemplate: "iniciante",
   adminDraftJson: "",
   adminDiffText: "",
+  adminRollFeed: [],
+  adminDraftRollAgent: "",
+  adminDraftRollSkill: "Percepção",
+  adminDraftRollValue: "20",
+  adminDraftRewardXp: "0",
+  adminDraftRewardCoins: "0",
+  adminDraftRewardItem: "",
+  adminCombatants: [],
+  adminDraftCombatName: "",
+  adminDraftCombatInit: "10",
+  activeAuditHistory: [],
+  realtimeFeedEvents: [],
+  lastObservedByUid: createSafeRecord(),
+  realtimeAllUnsubscribe: null,
   activeNotice: null,
   globalNotice: null,
   noticeExpiryTimer: null
@@ -430,6 +459,157 @@ function initConsoleSecurityGuard() {
   } catch {
     // Ignora caso console esteja restrito
   }
+}
+
+/* --------------------------------------------------------------------------
+   Auditoria Anti-Adulteração e Escuta em Tempo Real por Jogador
+   -------------------------------------------------------------------------- */
+function parseAuditHistoryFromFields(fieldsObj) {
+  if (!fieldsObj || typeof fieldsObj !== "object") return [];
+  if (!Object.prototype.hasOwnProperty.call(fieldsObj, AUDIT_HISTORY_FIELD_KEY)) return [];
+  const raw = fieldsObj[AUDIT_HISTORY_FIELD_KEY];
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  return raw
+    .split("\n")
+    .map((line) => sanitizeSingleLine(line, 220))
+    .filter(Boolean)
+    .slice(-MAX_AUDIT_ENTRIES);
+}
+
+function buildUpdatedAuditHistoryString(previousEntries, diffLines, actorLabel) {
+  const existing = Array.isArray(previousEntries) ? [...previousEntries] : [];
+  if (!Array.isArray(diffLines) || !diffLines.length) {
+    return existing.join("\n").slice(-MAX_AUDIT_PAYLOAD_CHARS);
+  }
+
+  const stamp = new Date().toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+
+  const newLines = diffLines.slice(0, 15).map((item) => {
+    const cleanItem = sanitizeSingleLine(item, 160);
+    return `[${stamp}] (${actorLabel}) ${cleanItem}`;
+  });
+
+  const merged = [...existing, ...newLines].slice(-MAX_AUDIT_ENTRIES);
+  let serialized = merged.join("\n");
+  while (serialized.length > MAX_AUDIT_PAYLOAD_CHARS && merged.length > 1) {
+    merged.shift();
+    serialized = merged.join("\n");
+  }
+  return serialized;
+}
+
+function computeFieldDiffBetweenMaps(oldFields, newFields) {
+  const prev = oldFields && typeof oldFields === "object" ? oldFields : {};
+  const next = newFields && typeof newFields === "object" ? newFields : {};
+  const keys = Array.from(new Set([...Object.keys(prev), ...Object.keys(next)])).sort();
+  const diffs = [];
+
+  for (let i = 0; i < keys.length; i += 1) {
+    const k = keys[i];
+    if (
+      !isValidFieldKey(k) ||
+      k === ADMIN_NOTICE_FIELD_KEY ||
+      k === TEMP_ADMIN_GRANT_FIELD_KEY ||
+      k === MASTER_UPDATE_LOG_FIELD_KEY ||
+      k === AUDIT_HISTORY_FIELD_KEY
+    ) {
+      continue;
+    }
+    const oldVal = Object.prototype.hasOwnProperty.call(prev, k) ? String(prev[k]) : "";
+    const newVal = Object.prototype.hasOwnProperty.call(next, k) ? String(next[k]) : "";
+    if (oldVal !== newVal) {
+      const label = k.startsWith("id:") ? k.slice(3) : k;
+      if (!oldVal && newVal) {
+        diffs.push(`+ Adicionou ${label}: "${newVal}"`);
+      } else if (oldVal && !newVal) {
+        diffs.push(`- Removeu ${label} (era "${oldVal}")`);
+      } else {
+        diffs.push(`~ Alterou ${label}: "${oldVal}" → "${newVal}"`);
+      }
+    }
+  }
+  return diffs;
+}
+
+function stopRealtimeCampaignMonitor() {
+  if (typeof state.realtimeAllUnsubscribe === "function") {
+    state.realtimeAllUnsubscribe();
+    state.realtimeAllUnsubscribe = null;
+  }
+  state.lastObservedByUid = createSafeRecord();
+  state.realtimeFeedEvents = [];
+}
+
+function startRealtimeCampaignMonitor() {
+  stopRealtimeCampaignMonitor();
+  if (!isCurrentUserAdmin() || !state.firebaseReady || !state.db || !state.firebaseModules) return;
+
+  const { collection, onSnapshot } = state.firebaseModules.firestoreMod;
+  const colRef = collection(state.db, FIRESTORE_COLLECTION);
+
+  state.realtimeAllUnsubscribe = onSnapshot(
+    colRef,
+    (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        const docId = change.doc.id;
+        if (docId === GLOBAL_BROADCAST_DOC_ID) return;
+        if (docId === ADMIN_UID && !isMasterAdmin()) return;
+
+        const data = change.doc.data() || {};
+        const newFields = data.fields && typeof data.fields === "object" ? data.fields : {};
+        const agentName = sanitizeSingleLine(
+          String(newFields["id:nome-agente"] || newFields["id:agente-nome"] || docId),
+          50
+        );
+
+        const hadPrev = Object.prototype.hasOwnProperty.call(state.lastObservedByUid, docId);
+        const prevFields = hadPrev ? state.lastObservedByUid[docId] : null;
+
+        const clonedSnapshot = createSafeRecord();
+        Object.entries(newFields).forEach(([k, v]) => {
+          if (isValidFieldKey(k)) clonedSnapshot[k] = v;
+        });
+        state.lastObservedByUid[docId] = clonedSnapshot;
+
+        if (change.type === "modified" && prevFields) {
+          const diffs = computeFieldDiffBetweenMaps(prevFields, newFields);
+          if (diffs.length) {
+            const timeStr = new Date().toLocaleTimeString("pt-BR", {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit"
+            });
+            diffs.forEach((d) => {
+              const alertLine = `[${timeStr}] [${agentName} | ${docId.slice(0, 8)}…] ${d}`;
+              state.realtimeFeedEvents = [alertLine, ...state.realtimeFeedEvents].slice(0, 50);
+              appendAdminLog(alertLine);
+            });
+
+            if (getActiveTargetUid() === docId && docId !== state.user?.uid) {
+              state.activeAuditHistory = parseAuditHistoryFromFields(newFields);
+              applySheetData(data, docId);
+              setStatusBanner(`ALERTA AO VIVO (${agentName}): ${diffs[0]}`, "warning");
+            } else {
+              setStatusBanner(`Alteração ao vivo em ${agentName}: ${diffs[0]}`, "info");
+            }
+
+            if (state.adminActiveCommand === "/auditoria") {
+              renderAdminCommandFunctionsBelow();
+            }
+          }
+        }
+      });
+    },
+    () => {
+      // Falha silenciosa caso escuta coletiva seja bloqueada
+    }
+  );
 }
 
 /* --------------------------------------------------------------------------
@@ -1066,6 +1246,7 @@ function scheduleTempAdminExpiryCheck() {
   const remainingMs = state.tempAdminGrant.expiresAt - Date.now();
   if (remainingMs <= 0) {
     state.tempAdminGrant = null;
+    stopRealtimeCampaignMonitor();
     updateAdminBarUI();
     return;
   }
@@ -1074,7 +1255,8 @@ function scheduleTempAdminExpiryCheck() {
     state.tempAdminExpiryTimer = null;
     if (state.tempAdminGrant && !state.tempAdminGrant.indefinite && Date.now() >= state.tempAdminGrant.expiresAt) {
       state.tempAdminGrant = null;
-      if (state.adminActiveCommand === "/admin") {
+      stopRealtimeCampaignMonitor();
+      if (state.adminActiveCommand === "/admin" || state.adminActiveCommand === "/removeradmin") {
         state.adminActiveCommand = "";
       }
       updateAdminBarUI();
@@ -1448,8 +1630,8 @@ async function loadGlobalBroadcastNotice() {
 }
 
 /* --------------------------------------------------------------------------
-   Helpers da Conta Admin: Prompt, Funções Abaixo do Comando e
-   Área de Todos os Comandos Ativos (com bloqueio da ficha do Admin Master)
+   Helpers da Conta Admin: Prompt, Funções Abaixo do Comando, Painel do Mestre
+   e Área de Todos os Comandos Ativos (com bloqueio da ficha do Admin Master)
    -------------------------------------------------------------------------- */
 function sanitizeTargetUid(rawUid) {
   const clean = sanitizeSingleLine(String(rawUid ?? ""), 128);
@@ -1482,6 +1664,149 @@ function appendAdminLog(actionText) {
   }
 }
 
+function getSheetFieldById(fieldId) {
+  const el = document.getElementById(fieldId);
+  if (!el) return "";
+  return sanitizeSingleLine(String(el.value ?? ""), 120);
+}
+
+function getActiveAgentSummary() {
+  const nome =
+    getSheetFieldById("nome-agente") ||
+    getSheetFieldById("agente-nome") ||
+    getActiveTargetUid() ||
+    "Agente";
+
+  const vida =
+    getSheetFieldById("vida-atual") ||
+    getSheetFieldById("pv-atual") ||
+    getSheetFieldById("vida-val") ||
+    "0";
+
+  const sanidade =
+    getSheetFieldById("sanidade-atual") ||
+    getSheetFieldById("san-atual") ||
+    getSheetFieldById("sanidade-val") ||
+    "0";
+
+  const medo =
+    getSheetFieldById("medo-atual") ||
+    getSheetFieldById("medo-val") ||
+    "0";
+
+  const esforco =
+    getSheetFieldById("esforco-atual") ||
+    getSheetFieldById("pe-atual") ||
+    getSheetFieldById("esforco-val") ||
+    "0";
+
+  const nen =
+    getSheetFieldById("categoria-principal-nen") ||
+    getSheetFieldById("afinidade-nen") ||
+    "Não definida";
+
+  return {
+    uid: getActiveTargetUid() || "local",
+    nome,
+    vida,
+    sanidade,
+    medo,
+    esforco,
+    nen
+  };
+}
+
+function findSkillSummaryByName(queryName) {
+  const cleanQuery = sanitizeSingleLine(queryName || "", 60)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  const table = document.getElementById("tabela-pericias");
+  if (!table) return [];
+
+  const results = [];
+  const rows = table.querySelectorAll("tbody tr");
+  rows.forEach((row) => {
+    const skillName = sanitizeSingleLine(
+      (row.cells && row.cells[0] ? row.cells[0].textContent : "") || "",
+      60
+    );
+    const totalInput = row.querySelector("input.total-cell");
+    const totalVal = totalInput ? sanitizeSingleLine(totalInput.value || "0", 16) : "0";
+    if (!skillName) return;
+
+    const normSkill = skillName
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+    if (!cleanQuery || normSkill.includes(cleanQuery)) {
+      results.push(`${skillName}: +${totalVal}`);
+    }
+  });
+
+  return results;
+}
+
+function addRollToFeed(agentName, skillName, rollValue) {
+  const cleanAgent = sanitizeSingleLine(agentName || getActiveAgentSummary().nome, 60) || "Agente";
+  const cleanSkill = sanitizeSingleLine(skillName || "Perícia", 60) || "Perícia";
+  const cleanVal = sanitizeSingleLine(String(rollValue ?? "0"), 24) || "0";
+  const timeStr = new Date().toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+  const entry = `[${timeStr}] Agente ${cleanAgent} rolou ${cleanSkill}: ${cleanVal}`;
+  state.adminRollFeed = [entry, ...state.adminRollFeed].slice(0, MAX_ROLL_FEED);
+  appendAdminLog(entry);
+}
+
+function appendRewardToTargetSheet(xpVal, coinsVal, itemText) {
+  const xpNum = Number(String(xpVal ?? "0").replace(",", "."));
+  const coinsNum = Number(String(coinsVal ?? "0").replace(",", "."));
+  const cleanItem = sanitizeSingleLine(itemText || "", 120);
+
+  const safeXp = Number.isFinite(xpNum) ? Math.trunc(xpNum) : 0;
+  const safeCoins = Number.isFinite(coinsNum) ? Math.trunc(coinsNum) : 0;
+
+  if (safeXp !== 0) {
+    const xpInput = document.getElementById("xp-val") || document.getElementById("guilda-xp");
+    if (xpInput) {
+      const currentXp = Number(String(xpInput.value || "0").replace(",", ".")) || 0;
+      xpInput.value = String(Math.max(0, Math.trunc(currentXp) + safeXp));
+    }
+  }
+
+  if (safeCoins !== 0) {
+    const coinsInput =
+      document.getElementById("moedas-val") ||
+      document.getElementById("dinheiro-val") ||
+      document.getElementById("guilda-moedas");
+    if (coinsInput) {
+      const currentCoins = Number(String(coinsInput.value || "0").replace(",", ".")) || 0;
+      coinsInput.value = String(Math.max(0, Math.trunc(currentCoins) + safeCoins));
+    }
+  }
+
+  if (cleanItem) {
+    const invInput =
+      document.getElementById("equipamentos-lista") ||
+      document.getElementById("guilda-itens") ||
+      document.getElementById("anotacoes-guilda");
+    if (invInput) {
+      const prefix = invInput.value.trim() ? `${invInput.value.trim()}\n` : "";
+      invInput.value = `${prefix}• ${cleanItem}`.slice(0, 5000);
+    }
+  }
+
+  const parts = [];
+  if (safeXp !== 0) parts.push(`${safeXp > 0 ? "+" : ""}${safeXp} XP`);
+  if (safeCoins !== 0) parts.push(`${safeCoins > 0 ? "+" : ""}${safeCoins} Moedas`);
+  if (cleanItem) parts.push(`Item: ${cleanItem}`);
+  return parts.join(" | ");
+}
+
 function captureBaselineFields(fieldsObj) {
   const copy = createSafeRecord();
   if (!fieldsObj || typeof fieldsObj !== "object") {
@@ -1508,7 +1833,8 @@ function computeSheetDiffList() {
       !isValidFieldKey(key) ||
       key === ADMIN_NOTICE_FIELD_KEY ||
       key === TEMP_ADMIN_GRANT_FIELD_KEY ||
-      key === MASTER_UPDATE_LOG_FIELD_KEY
+      key === MASTER_UPDATE_LOG_FIELD_KEY ||
+      key === AUDIT_HISTORY_FIELD_KEY
     ) {
       continue;
     }
@@ -1524,7 +1850,7 @@ function computeSheetDiffList() {
 
 function saveAdminTargetUidToStorage(uid) {
   try {
-    if (uid && isMasterAdmin()) {
+    if (uid && isCurrentUserAdmin()) {
       sessionStorage.setItem(STORAGE_KEYS.ADMIN_TARGET_UID, uid);
     } else {
       sessionStorage.removeItem(STORAGE_KEYS.ADMIN_TARGET_UID);
@@ -1535,7 +1861,7 @@ function saveAdminTargetUidToStorage(uid) {
 }
 
 function loadAdminTargetUidFromStorage() {
-  if (!isMasterAdmin()) return "";
+  if (!isCurrentUserAdmin()) return "";
   try {
     const raw = sessionStorage.getItem(STORAGE_KEYS.ADMIN_TARGET_UID) || "";
     return sanitizeTargetUid(raw);
@@ -1545,7 +1871,7 @@ function loadAdminTargetUidFromStorage() {
 }
 
 function recordRecentAdminUid(uid) {
-  if (!isMasterAdmin()) return;
+  if (!isCurrentUserAdmin()) return;
   const clean = sanitizeTargetUid(uid);
   if (!clean) return;
   const next = [clean, ...state.adminRecentUids.filter((item) => item !== clean)].slice(0, MAX_RECENT_UIDS);
@@ -1555,13 +1881,18 @@ function recordRecentAdminUid(uid) {
   } catch {
     // Ignora falha de armazenamento
   }
-  if (state.adminActiveCommand === "/uid" || state.adminActiveCommand === "/minha") {
+  if (
+    state.adminActiveCommand === "/uid" ||
+    state.adminActiveCommand === "/minha" ||
+    state.adminActiveCommand === "/consulta" ||
+    state.adminActiveCommand === "/auditoria"
+  ) {
     renderAdminCommandFunctionsBelow();
   }
 }
 
 function loadRecentAdminUidsFromStorage() {
-  if (!isMasterAdmin()) return [];
+  if (!isCurrentUserAdmin()) return [];
   try {
     const raw = sessionStorage.getItem(STORAGE_KEYS.ADMIN_RECENT_UIDS);
     if (!raw) return [];
@@ -1575,6 +1906,9 @@ function loadRecentAdminUidsFromStorage() {
 
 function getActiveTargetUid() {
   if (!state.user || !state.user.uid) return "";
+  if (isCurrentUserAdmin() && state.adminTargetUid && state.adminTargetUid !== ADMIN_UID) {
+    return state.adminTargetUid;
+  }
   if (isMasterAdmin() && state.adminTargetUid) {
     return state.adminTargetUid;
   }
@@ -1630,6 +1964,18 @@ function resolveCommandNameFromInput(rawInput) {
   if (normalizedToken === "/help") {
     return "/ajuda";
   }
+  if (normalizedToken === "/iniciativa" || normalizedToken === "/turnos") {
+    return "/combate";
+  }
+  if (normalizedToken === "/itens" || normalizedToken === "/xp") {
+    return "/recompensa";
+  }
+  if (normalizedToken === "/dados" || normalizedToken === "/rolar") {
+    return "/rolagens";
+  }
+  if (normalizedToken === "/historico" || normalizedToken === "/logs" || normalizedToken === "/anti-roubo") {
+    return "/auditoria";
+  }
 
   const available = getAvailableCommandsForCurrentUser();
   const found = available.find((item) => item.cmd === normalizedToken);
@@ -1678,8 +2024,8 @@ function renderActiveCommandsStrip() {
 
   const header = document.createElement("div");
   header.textContent = isMasterAdmin()
-    ? "Comandos ativos (clique para carregar no prompt e exibir as funções abaixo):"
-    : "Comandos ativos do admin temporário (sem acesso à ficha do master e sem adicionar/remover admin):";
+    ? "Comandos ativos (clique para abrir cada função separada abaixo):"
+    : "Comandos ativos do painel do mestre (auditoria em tempo real ativa; ficha master privada e sem add/remover admin):";
   header.style.cssText = "font-size: 12px; color: #ffd966; font-weight: 600; margin-bottom: 6px;";
   strip.appendChild(header);
 
@@ -1736,14 +2082,12 @@ function renderAdminCommandFunctionsBelow() {
     return;
   }
 
-  if ((cmd === "/admin" || cmd === "/uid") && !isMasterAdmin()) {
+  if ((cmd === "/admin" || cmd === "/removeradmin") && !isMasterAdmin()) {
     box.hidden = false;
     box.replaceChildren();
     const denied = document.createElement("div");
     denied.textContent =
-      cmd === "/uid"
-        ? "Apenas o administrador master pode carregar fichas de outros UIDs."
-        : "Administrador temporário não pode adicionar ou remover administradores.";
+      "Apenas o administrador master pode conceder ou remover administradores temporários/indeterminados.";
     denied.style.cssText = "font-size: 12px; color: #ff8a80; font-weight: 600;";
     box.appendChild(denied);
     return;
@@ -1758,8 +2102,8 @@ function renderAdminCommandFunctionsBelow() {
   const title = document.createElement("strong");
   const spec = getAvailableCommandsForCurrentUser().find((c) => c.cmd === cmd);
   title.textContent = spec
-    ? `Funções do comando ${spec.syntax} — ${spec.desc}`
-    : `Funções do comando ${cmd}`;
+    ? `Função exclusiva: ${spec.syntax} — ${spec.desc}`
+    : `Função do comando ${cmd}`;
   title.style.cssText = "color: #ffd966; font-size: 12px;";
 
   const hideBtn = document.createElement("button");
@@ -1776,6 +2120,92 @@ function renderAdminCommandFunctionsBelow() {
   titleRow.appendChild(hideBtn);
   box.appendChild(titleRow);
 
+  if (cmd === "/auditoria") {
+    const col = document.createElement("div");
+    col.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
+
+    const filterRow = document.createElement("div");
+    filterRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+    const uidInp = document.createElement("input");
+    uidInp.type = "text";
+    uidInp.value = state.adminDraftUid || state.adminTargetUid || "";
+    uidInp.placeholder = "UID do jogador para auditar e carregar...";
+    uidInp.style.cssText = "flex: 1 1 200px; padding: 6px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    uidInp.addEventListener("input", () => {
+      state.adminDraftUid = uidInp.value;
+    });
+
+    const inspectBtn = document.createElement("button");
+    inspectBtn.type = "button";
+    inspectBtn.textContent = "Carregar e auditar UID";
+    inspectBtn.style.cssText = "padding: 6px 11px; border-radius: 7px; border: none; background: #2b8a6e; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+    inspectBtn.addEventListener("click", async () => {
+      await handleAdminLoadTargetUid(uidInp.value);
+      state.adminActiveCommand = "/auditoria";
+      renderAdminCommandFunctionsBelow();
+    });
+
+    const clearFeedBtn = document.createElement("button");
+    clearFeedBtn.type = "button";
+    clearFeedBtn.textContent = "Limpar feed ao vivo";
+    clearFeedBtn.style.cssText = "padding: 6px 10px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #e4e4ec; font-size: 12px; cursor: pointer;";
+    clearFeedBtn.addEventListener("click", () => {
+      state.realtimeFeedEvents = [];
+      renderAdminCommandFunctionsBelow();
+    });
+
+    filterRow.appendChild(uidInp);
+    filterRow.appendChild(inspectBtn);
+    filterRow.appendChild(clearFeedBtn);
+    col.appendChild(filterRow);
+
+    const liveTitle = document.createElement("div");
+    liveTitle.textContent = "Feed em Tempo Real da Mesa (alterações/adições detectadas ao vivo):";
+    liveTitle.style.cssText = "font-size: 12px; font-weight: 700; color: #72efb3;";
+    col.appendChild(liveTitle);
+
+    const liveList = document.createElement("ul");
+    liveList.style.cssText = "margin: 0; padding-left: 16px; max-height: 125px; overflow-y: auto; font-size: 11px; color: #eefaf3;";
+    if (!state.realtimeFeedEvents.length) {
+      const li = document.createElement("li");
+      li.textContent = "Monitorando jogadores em tempo real. Quando alguém alterar ou adicionar algo na ficha, aparecerá aqui.";
+      liveList.appendChild(li);
+    } else {
+      state.realtimeFeedEvents.forEach((ev) => {
+        const li = document.createElement("li");
+        li.textContent = ev;
+        li.style.marginBottom = "3px";
+        liveList.appendChild(li);
+      });
+    }
+    col.appendChild(liveList);
+
+    const histTitle = document.createElement("div");
+    histTitle.textContent = `Histórico Registrado do Jogador Atual (${getActiveAgentSummary().nome}):`;
+    histTitle.style.cssText = "font-size: 12px; font-weight: 700; color: #ffd966;";
+    col.appendChild(histTitle);
+
+    const histList = document.createElement("ul");
+    histList.style.cssText = "margin: 0; padding-left: 16px; max-height: 125px; overflow-y: auto; font-size: 11px; color: #d6dee6;";
+    if (!state.activeAuditHistory.length) {
+      const li = document.createElement("li");
+      li.textContent = "Nenhum registro de alteração gravado na ficha deste alvo ainda.";
+      histList.appendChild(li);
+    } else {
+      state.activeAuditHistory.slice().reverse().forEach((entry) => {
+        const li = document.createElement("li");
+        li.textContent = entry;
+        li.style.marginBottom = "3px";
+        histList.appendChild(li);
+      });
+    }
+    col.appendChild(histList);
+
+    box.appendChild(col);
+    return;
+  }
+
   if (cmd === "/admin" && isMasterAdmin()) {
     const row = document.createElement("div");
     row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
@@ -1783,7 +2213,7 @@ function renderAdminCommandFunctionsBelow() {
     const uidInput = document.createElement("input");
     uidInput.type = "text";
     uidInput.value = state.adminDraftTempAdminUid || "";
-    uidInput.placeholder = "UID para receber admin temporário...";
+    uidInput.placeholder = "UID para receber admin temporário/indeterminado...";
     uidInput.style.cssText = "flex: 1 1 200px; padding: 7px 10px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
     uidInput.addEventListener("input", () => {
       state.adminDraftTempAdminUid = uidInput.value;
@@ -1834,16 +2264,35 @@ function renderAdminCommandFunctionsBelow() {
     row.appendChild(indefiniteBtn);
     row.appendChild(grantBtn);
     box.appendChild(row);
-
-    const note = document.createElement("div");
-    note.textContent =
-      "No painel mestre você pode escolher um tempo de até 24h ou ativar 'Tempo indeterminado'. O administrador temporário não poderá ver a ficha do master nem adicionar/remover administradores.";
-    note.style.cssText = "margin-top: 7px; font-size: 11px; color: #b8c2cc;";
-    box.appendChild(note);
     return;
   }
 
-  if (cmd === "/uid" && isMasterAdmin()) {
+  if (cmd === "/removeradmin" && isMasterAdmin()) {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+    const uidInput = document.createElement("input");
+    uidInput.type = "text";
+    uidInput.value = state.adminDraftRevokeAdminUid || state.adminTargetUid || "";
+    uidInput.placeholder = "UID do administrador temporário ou indeterminado para remover...";
+    uidInput.style.cssText = "flex: 1 1 220px; padding: 7px 10px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    uidInput.addEventListener("input", () => {
+      state.adminDraftRevokeAdminUid = uidInput.value;
+    });
+
+    const revokeBtn = document.createElement("button");
+    revokeBtn.type = "button";
+    revokeBtn.textContent = "Remover admin temporário/indeterminado";
+    revokeBtn.style.cssText = "padding: 7px 12px; border-radius: 7px; border: none; background: #a83232; color: #fff; font-weight: 700; font-size: 12px; cursor: pointer;";
+    revokeBtn.addEventListener("click", () => handleAdminRevokeTempRole(uidInput.value));
+
+    row.appendChild(uidInput);
+    row.appendChild(revokeBtn);
+    box.appendChild(row);
+    return;
+  }
+
+  if (cmd === "/uid") {
     const row = document.createElement("div");
     row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
 
@@ -1912,6 +2361,247 @@ function renderAdminCommandFunctionsBelow() {
     return;
   }
 
+  if (cmd === "/equipe") {
+    const ag = getActiveAgentSummary();
+    const card = document.createElement("div");
+    card.style.cssText = "padding: 8px 10px; border-radius: 7px; background: rgba(18, 28, 38, 0.9); border: 1px solid rgba(255,255,255,0.12); font-size: 12px; color: #eef3f8;";
+    card.textContent = `Agente: ${ag.nome} (UID: ${ag.uid}) · Vida: ${ag.vida} · Sanidade: ${ag.sanidade} · Medo: ${ag.medo} · Esforço: ${ag.esforco}`;
+    box.appendChild(card);
+    return;
+  }
+
+  if (cmd === "/consulta") {
+    const ag = getActiveAgentSummary();
+    const percepcao = findSkillSummaryByName("percepcao");
+    const intuicao = findSkillSummaryByName("intuicao");
+
+    const info = document.createElement("div");
+    info.style.cssText = "font-size: 12px; color: #d6dee6; display: flex; flex-direction: column; gap: 4px;";
+
+    const nenLine = document.createElement("div");
+    nenLine.textContent = `Agente ${ag.nome} — Categoria de Nen: ${ag.nen}`;
+    const percLine = document.createElement("div");
+    percLine.textContent = percepcao.length ? `Percepção: ${percepcao.join(", ")}` : "Percepção: não encontrada na tabela";
+    const intLine = document.createElement("div");
+    intLine.textContent = intuicao.length ? `Intuição: ${intuicao.join(", ")}` : "Intuição: não encontrada na tabela";
+
+    info.appendChild(nenLine);
+    info.appendChild(percLine);
+    info.appendChild(intLine);
+    box.appendChild(info);
+    return;
+  }
+
+  if (cmd === "/rolagens") {
+    const ag = getActiveAgentSummary();
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px;";
+
+    const agentInp = document.createElement("input");
+    agentInp.type = "text";
+    agentInp.value = state.adminDraftRollAgent || ag.nome;
+    agentInp.placeholder = "Nome do agente...";
+    agentInp.style.cssText = "flex: 1 1 140px; padding: 6px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    agentInp.addEventListener("input", () => {
+      state.adminDraftRollAgent = agentInp.value;
+    });
+
+    const skillInp = document.createElement("input");
+    skillInp.type = "text";
+    skillInp.value = state.adminDraftRollSkill || "Furtividade";
+    skillInp.placeholder = "Perícia ou teste...";
+    skillInp.style.cssText = "flex: 1 1 140px; padding: 6px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    skillInp.addEventListener("input", () => {
+      state.adminDraftRollSkill = skillInp.value;
+    });
+
+    const valInp = document.createElement("input");
+    valInp.type = "number";
+    valInp.value = state.adminDraftRollValue || "20";
+    valInp.style.cssText = "width: 78px; padding: 6px 8px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    valInp.addEventListener("input", () => {
+      state.adminDraftRollValue = valInp.value;
+    });
+
+    const addRollBtn = document.createElement("button");
+    addRollBtn.type = "button";
+    addRollBtn.textContent = "Registrar rolagem";
+    addRollBtn.style.cssText = "padding: 6px 11px; border-radius: 7px; border: none; background: #2b8a6e; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+    addRollBtn.addEventListener("click", () => {
+      addRollToFeed(agentInp.value, skillInp.value, valInp.value);
+      renderAdminCommandFunctionsBelow();
+    });
+
+    const clearRollsBtn = document.createElement("button");
+    clearRollsBtn.type = "button";
+    clearRollsBtn.textContent = "Limpar feed";
+    clearRollsBtn.style.cssText = "padding: 6px 10px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #e4e4ec; font-size: 12px; cursor: pointer;";
+    clearRollsBtn.addEventListener("click", () => {
+      state.adminRollFeed = [];
+      renderAdminCommandFunctionsBelow();
+    });
+
+    row.appendChild(agentInp);
+    row.appendChild(skillInp);
+    row.appendChild(valInp);
+    row.appendChild(addRollBtn);
+    row.appendChild(clearRollsBtn);
+    box.appendChild(row);
+
+    const list = document.createElement("ul");
+    list.style.cssText = "margin: 0; padding-left: 16px; max-height: 120px; overflow-y: auto; font-size: 12px; color: #ffe082;";
+    if (!state.adminRollFeed.length) {
+      const li = document.createElement("li");
+      li.textContent = "Nenhuma rolagem registrada nesta sessão.";
+      list.appendChild(li);
+    } else {
+      state.adminRollFeed.forEach((item) => {
+        const li = document.createElement("li");
+        li.textContent = item;
+        li.style.marginBottom = "3px";
+        list.appendChild(li);
+      });
+    }
+    box.appendChild(list);
+    return;
+  }
+
+  if (cmd === "/recompensa") {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;";
+
+    const xpInp = document.createElement("input");
+    xpInp.type = "number";
+    xpInp.value = state.adminDraftRewardXp || "0";
+    xpInp.placeholder = "XP";
+    xpInp.title = "Quantidade de XP";
+    xpInp.style.cssText = "width: 82px; padding: 6px 8px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    xpInp.addEventListener("input", () => {
+      state.adminDraftRewardXp = xpInp.value;
+    });
+
+    const coinsInp = document.createElement("input");
+    coinsInp.type = "number";
+    coinsInp.value = state.adminDraftRewardCoins || "0";
+    coinsInp.placeholder = "Moedas";
+    coinsInp.title = "Quantidade de Moedas";
+    coinsInp.style.cssText = "width: 90px; padding: 6px 8px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    coinsInp.addEventListener("input", () => {
+      state.adminDraftRewardCoins = coinsInp.value;
+    });
+
+    const itemInp = document.createElement("input");
+    itemInp.type = "text";
+    itemInp.value = state.adminDraftRewardItem || "";
+    itemInp.placeholder = "Item ou equipamento para Guilda/Inventário...";
+    itemInp.style.cssText = "flex: 1 1 200px; padding: 6px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    itemInp.addEventListener("input", () => {
+      state.adminDraftRewardItem = itemInp.value;
+    });
+
+    const sendBtn = document.createElement("button");
+    sendBtn.type = "button";
+    sendBtn.textContent = "Enviar recompensa e salvar";
+    sendBtn.style.cssText = "padding: 7px 11px; border-radius: 7px; border: none; background: #c48b1b; color: #111; font-weight: 700; font-size: 12px; cursor: pointer;";
+    sendBtn.addEventListener("click", async () => {
+      if (isInspectionReadOnlyActive()) {
+        setStatusBanner("Desative 'Somente leitura' antes de enviar recompensas.", "warning");
+        return;
+      }
+      const desc = appendRewardToTargetSheet(xpInp.value, coinsInp.value, itemInp.value);
+      if (!desc) {
+        setStatusBanner("Informe XP, Moedas ou um Item para enviar.", "warning");
+        return;
+      }
+      state.adminDraftRewardXp = "0";
+      state.adminDraftRewardCoins = "0";
+      state.adminDraftRewardItem = "";
+      appendAdminLog(`Recompensa enviada (${desc}) para UID ${getActiveTargetUid()}`);
+      await persistSheet(true, `Recompensa (${desc}) enviada ao UID ${getActiveTargetUid()}`);
+      renderAdminCommandFunctionsBelow();
+    });
+
+    row.appendChild(xpInp);
+    row.appendChild(coinsInp);
+    row.appendChild(itemInp);
+    row.appendChild(sendBtn);
+    box.appendChild(row);
+    return;
+  }
+
+  if (cmd === "/combate") {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px;";
+
+    const nameInp = document.createElement("input");
+    nameInp.type = "text";
+    nameInp.value = state.adminDraftCombatName || "";
+    nameInp.placeholder = "Nome do agente ou inimigo...";
+    nameInp.style.cssText = "flex: 1 1 160px; padding: 6px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    nameInp.addEventListener("input", () => {
+      state.adminDraftCombatName = nameInp.value;
+    });
+
+    const initInp = document.createElement("input");
+    initInp.type = "number";
+    initInp.value = state.adminDraftCombatInit || "10";
+    initInp.placeholder = "Iniciativa";
+    initInp.style.cssText = "width: 84px; padding: 6px 8px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #fff; font-size: 12px;";
+    initInp.addEventListener("input", () => {
+      state.adminDraftCombatInit = initInp.value;
+    });
+
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.textContent = "Adicionar e ordenar";
+    addBtn.style.cssText = "padding: 6px 11px; border-radius: 7px; border: none; background: #356899; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer;";
+    addBtn.addEventListener("click", () => {
+      const cleanName = sanitizeSingleLine(nameInp.value || "", 60);
+      if (!cleanName) return;
+      const initNum = Number(String(initInp.value ?? "0").replace(",", "."));
+      const safeInit = Number.isFinite(initNum) ? Math.trunc(initNum) : 0;
+      state.adminCombatants = [
+        ...state.adminCombatants,
+        { id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, name: cleanName, init: safeInit }
+      ].sort((a, b) => b.init - a.init);
+      state.adminDraftCombatName = "";
+      appendAdminLog(`Iniciativa adicionada: ${cleanName} (${safeInit})`);
+      renderAdminCommandFunctionsBelow();
+    });
+
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.textContent = "Limpar combate";
+    clearBtn.style.cssText = "padding: 6px 10px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #e4e4ec; font-size: 12px; cursor: pointer;";
+    clearBtn.addEventListener("click", () => {
+      state.adminCombatants = [];
+      renderAdminCommandFunctionsBelow();
+    });
+
+    row.appendChild(nameInp);
+    row.appendChild(initInp);
+    row.appendChild(addBtn);
+    row.appendChild(clearBtn);
+    box.appendChild(row);
+
+    const list = document.createElement("ol");
+    list.style.cssText = "margin: 0; padding-left: 18px; font-size: 12px; color: #eef3f8;";
+    if (!state.adminCombatants.length) {
+      const li = document.createElement("li");
+      li.textContent = "Nenhum participante na fila de iniciativa.";
+      list.appendChild(li);
+    } else {
+      state.adminCombatants.forEach((c) => {
+        const li = document.createElement("li");
+        li.textContent = `${c.name} — Iniciativa: ${c.init}`;
+        li.style.marginBottom = "3px";
+        list.appendChild(li);
+      });
+    }
+    box.appendChild(list);
+    return;
+  }
+
   if (
     cmd === "/recado" ||
     cmd === "/urgente" ||
@@ -1944,7 +2634,7 @@ function renderAdminCommandFunctionsBelow() {
     const scopeSelect = document.createElement("select");
     scopeSelect.style.cssText = "padding: 7px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.22); background: #0a0e12; color: #8ce0f0; font-size: 12px; font-weight: 600;";
     [
-      { value: "uid", label: isMasterAdmin() ? "UID alvo" : "Minha ficha" },
+      { value: "uid", label: isCurrentUserAdmin() ? "UID alvo" : "Minha ficha" },
       { value: "all", label: "TODOS os jogadores" }
     ].forEach((sc) => {
       const opt = document.createElement("option");
@@ -2322,7 +3012,7 @@ function ensureAdminBarElement() {
   topRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;";
 
   const title = document.createElement("strong");
-  title.textContent = "Prompt de Comando Admin";
+  title.textContent = "Painel do Mestre — Prompt de Comando Admin";
   title.style.cssText = "color: #ffd966; font-size: 13px;";
 
   const rightHeader = document.createElement("div");
@@ -2359,8 +3049,8 @@ function ensureAdminBarElement() {
   promptInput.type = "text";
   promptInput.id = "admin-prompt-input";
   promptInput.placeholder = isMasterAdmin()
-    ? "Digite um comando (ex: /todos indeterminado Aviso geral, /todosurgente 30 Atenção!, /recado 30 Oi, /uid, /ler, /stats)..."
-    : "Digite um comando (ex: /todos 60 Aviso geral, /recado 30 Oi, /ler, /stats, /modelo, /diff, /json, /log)...";
+    ? "Digite um comando (/auditoria, /equipe, /consulta, /rolagens, /recompensa, /combate, /removeradmin <UID>)..."
+    : "Digite um comando (/auditoria, /uid <UID>, /equipe, /consulta, /rolagens, /recompensa, /combate)...";
   promptInput.autocomplete = "off";
   promptInput.spellcheck = false;
   promptInput.setAttribute("aria-label", "Prompt de comando do administrador");
@@ -2508,7 +3198,7 @@ async function handleAdminGrantTempRole(overrideData) {
       `Admin (${durationText}) concedido ao UID ${targetUid} (sem acesso à ficha master e sem adicionar/remover admin)`
     );
     setStatusBanner(
-      `Função de admin concedida ao UID ${targetUid} por ${durationText} (sem acesso à ficha master e sem poder adicionar/remover admin).`,
+      `Função de admin concedida ao UID ${targetUid} por ${durationText}.`,
       "success"
     );
   } catch (err) {
@@ -2519,6 +3209,72 @@ async function handleAdminGrantTempRole(overrideData) {
         : "Erro ao salvar admin temporário no Firestore.",
       "error"
     );
+  }
+}
+
+async function handleAdminRevokeTempRole(rawUidOverride) {
+  if (!isMasterAdmin() || !state.firebaseReady || !state.db) {
+    setStatusBanner(
+      "Apenas o administrador principal pode remover administradores temporários ou indeterminados.",
+      "error"
+    );
+    return;
+  }
+
+  const rawCleaned = sanitizeSingleLine(
+    String(rawUidOverride !== undefined ? rawUidOverride : state.adminDraftRevokeAdminUid),
+    128
+  );
+  if (!UID_REGEX.test(rawCleaned)) {
+    setStatusBanner("Informe um UID válido para remover a função de administrador.", "warning");
+    return;
+  }
+
+  if (rawCleaned === ADMIN_UID) {
+    setStatusBanner("Não é possível remover a conta principal do administrador master.", "warning");
+    return;
+  }
+
+  const { doc, getDoc, setDoc } = state.firebaseModules.firestoreMod;
+  const docRef = doc(state.db, FIRESTORE_COLLECTION, rawCleaned);
+
+  try {
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) {
+      setStatusBanner("Nenhuma ficha encontrada para esse UID.", "info");
+      return;
+    }
+
+    const existingFields =
+      snap.exists() && snap.data() && snap.data().fields && typeof snap.data().fields === "object"
+        ? snap.data().fields
+        : createSafeRecord();
+
+    const nextFields = createSafeRecord();
+    Object.entries(existingFields).forEach(([k, v]) => {
+      if (isValidFieldKey(k) && k !== TEMP_ADMIN_GRANT_FIELD_KEY) {
+        nextFields[k] = v;
+      }
+    });
+
+    await setDoc(docRef, {
+      fields: nextFields,
+      atualizadoEm: new Date().toISOString()
+    });
+    state.lastCloudWriteAt = Date.now();
+
+    state.adminDraftRevokeAdminUid = "";
+    appendAdminLog(`Função de admin temporário/indeterminado removida do UID ${rawCleaned}`);
+    renderAdminCommandFunctionsBelow();
+    await recordMasterSuccessUpdate(
+      `Função de admin temporário/indeterminado removida do UID ${rawCleaned}`
+    );
+    setStatusBanner(
+      `Função de administrador temporário/indeterminado removida do UID ${rawCleaned}.`,
+      "success"
+    );
+  } catch {
+    setStatusBanner("Erro ao remover a função de administrador no Firestore.", "error");
   }
 }
 
@@ -2565,12 +3321,24 @@ async function handleAdminPromptSubmit(event) {
     return;
   }
 
-  if (cmd === "/uid") {
+  if (cmd === "/removeradmin") {
     if (!isMasterAdmin()) {
-      setStatusBanner("Apenas o administrador master pode carregar fichas de outros UIDs.", "error");
+      setStatusBanner(
+        "Apenas o administrador principal pode remover administradores temporários ou indeterminados.",
+        "error"
+      );
       renderAdminCommandFunctionsBelow();
       return;
     }
+    if (parts[1]) {
+      state.adminDraftRevokeAdminUid = parts[1];
+      await handleAdminRevokeTempRole(parts[1]);
+    }
+    renderAdminCommandFunctionsBelow();
+    return;
+  }
+
+  if (cmd === "/uid") {
     if (parts[1]) {
       state.adminDraftUid = parts[1];
       await handleAdminLoadTargetUid(parts[1]);
@@ -2582,6 +3350,31 @@ async function handleAdminPromptSubmit(event) {
 
   if (cmd === "/minha") {
     await handleAdminReturnToOwnSheet();
+    renderAdminCommandFunctionsBelow();
+    return;
+  }
+
+  if (cmd === "/auditoria" && parts[1]) {
+    state.adminDraftUid = parts[1];
+    await handleAdminLoadTargetUid(parts[1]);
+    state.adminActiveCommand = "/auditoria";
+    renderAdminCommandFunctionsBelow();
+    return;
+  }
+
+  if (cmd === "/consulta" && parts[1]) {
+    state.adminDraftUid = parts[1];
+    await handleAdminLoadTargetUid(parts[1]);
+    state.adminActiveCommand = "/consulta";
+    renderAdminCommandFunctionsBelow();
+    return;
+  }
+
+  if (cmd === "/rolagens" && parts.length >= 4) {
+    const valPart = parts[parts.length - 1];
+    const skillPart = parts[parts.length - 2];
+    const agentPart = parts.slice(1, parts.length - 2).join(" ");
+    addRollToFeed(agentPart, skillPart, valPart);
     renderAdminCommandFunctionsBelow();
     return;
   }
@@ -2797,8 +3590,8 @@ async function handleAdminApplyQuickStats(overrideValues) {
 }
 
 async function handleAdminLoadTargetUid(rawUidOverride) {
-  if (!isMasterAdmin()) {
-    setStatusBanner("Apenas o administrador principal pode carregar fichas de outros UIDs.", "error");
+  if (!isCurrentUserAdmin()) {
+    setStatusBanner("Apenas o painel do mestre pode carregar fichas de jogadores.", "error");
     return;
   }
 
@@ -2922,7 +3715,7 @@ async function handleAdminSendNotice(overrideData) {
   }
 
   const targetUid = sanitizeTargetUid(
-    isMasterAdmin()
+    isCurrentUserAdmin()
       ? state.adminTargetUid || state.adminDraftUid || state.user.uid
       : state.user.uid
   );
@@ -2931,7 +3724,7 @@ async function handleAdminSendNotice(overrideData) {
     return;
   }
 
-  if (isMasterAdmin()) {
+  if (isCurrentUserAdmin()) {
     state.adminTargetUid = targetUid;
     saveAdminTargetUidToStorage(targetUid);
     recordRecentAdminUid(targetUid);
@@ -3018,7 +3811,7 @@ async function handleAdminClearNotice(overrideData) {
   }
 
   const targetUid = sanitizeTargetUid(
-    isMasterAdmin()
+    isCurrentUserAdmin()
       ? state.adminTargetUid || state.adminDraftUid || state.user.uid
       : state.user.uid
   );
@@ -3352,10 +4145,12 @@ function updateScreenAccess() {
 }
 
 function enterOfflineTemporaryMode() {
+  stopRealtimeCampaignMonitor();
   state.offlineMode = true;
   state.activeNotice = null;
   state.globalNotice = null;
   state.tempAdminGrant = null;
+  state.activeAuditHistory = [];
   state.adminDraftNoticeIndefinite = false;
   state.adminDraftTempAdminIndefinite = false;
   state.masterUpdateNotice = null;
@@ -3479,6 +4274,17 @@ function collectSheetData() {
     fields[MASTER_UPDATE_LOG_FIELD_KEY] = JSON.stringify(state.masterUpdateNotice);
   }
 
+  const pendingDiffs = computeFieldDiffBetweenMaps(state.baselineFields, fields);
+  const actorLabel = isMasterAdmin()
+    ? "Master"
+    : hasActiveTempAdminRole()
+      ? `Mestre/${state.user?.uid?.slice(0, 6) || "temp"}`
+      : "Jogador";
+  const auditStr = buildUpdatedAuditHistoryString(state.activeAuditHistory, pendingDiffs, actorLabel);
+  if (auditStr) {
+    fields[AUDIT_HISTORY_FIELD_KEY] = auditStr;
+  }
+
   return {
     fields,
     atualizadoEm: new Date().toISOString()
@@ -3528,6 +4334,11 @@ function buildSanitizedCloudPayload() {
         continue;
       }
 
+      if (key === AUDIT_HISTORY_FIELD_KEY && typeof val === "string") {
+        cleanFields[key] = sanitizeText(val, MAX_AUDIT_PAYLOAD_CHARS);
+        continue;
+      }
+
       if (typeof val === "boolean") {
         cleanFields[key] = val;
       } else if (typeof val === "number" && Number.isFinite(val)) {
@@ -3536,7 +4347,9 @@ function buildSanitizedCloudPayload() {
         cleanFields[key] =
           key.startsWith("id:anotacoes") ||
           key.startsWith("id:hist-") ||
-          key.startsWith("id:proficiencias")
+          key.startsWith("id:proficiencias") ||
+          key.startsWith("id:equipamentos") ||
+          key.startsWith("id:guilda")
             ? sanitizeText(val, 5000)
             : sanitizeSingleLine(val, 250);
       }
@@ -3559,6 +4372,7 @@ function applySheetData(data, expectedUidForGrant = "") {
   if (!data || typeof data !== "object" || !data.fields || typeof data.fields !== "object") {
     state.activeNotice = null;
     state.tempAdminGrant = null;
+    state.activeAuditHistory = [];
     state.masterUpdateNotice = null;
     scheduleNoticeExpiryCheck();
     scheduleTempAdminExpiryCheck();
@@ -3573,6 +4387,7 @@ function applySheetData(data, expectedUidForGrant = "") {
   }
 
   state.activeNotice = parseActiveNoticeFromFields(data.fields);
+  state.activeAuditHistory = parseAuditHistoryFromFields(data.fields);
   scheduleNoticeExpiryCheck();
   renderPlayerNoticeBanner();
 
@@ -3791,6 +4606,7 @@ async function initFirebase() {
     state.firebaseReady = true;
 
     authMod.onAuthStateChanged(state.auth, async (user) => {
+      stopRealtimeCampaignMonitor();
       state.user = user || null;
       if (user) {
         state.offlineMode = false;
@@ -3832,6 +4648,7 @@ async function initFirebase() {
         state.activeNotice = null;
         state.globalNotice = null;
         state.tempAdminGrant = null;
+        state.activeAuditHistory = [];
         scheduleNoticeExpiryCheck();
         scheduleTempAdminExpiryCheck();
         saveAdminTargetUidToStorage("");
@@ -3846,14 +4663,17 @@ async function initFirebase() {
         }
         if (!state.isDeleting) {
           const targetUid = getActiveTargetUid();
-          const isRemoteTarget = isMasterAdmin() && targetUid && targetUid !== user.uid;
+          const isRemoteTarget = isCurrentUserAdmin() && targetUid && targetUid !== user.uid;
           setStatusBanner(
             isRemoteTarget
-              ? `Admin conectado. Carregando ficha do UID ${targetUid}...`
+              ? `Painel do mestre conectado. Carregando ficha do UID ${targetUid}...`
               : `Conectado como ${sanitizeSingleLine(user.email || "agente", 160)}. Carregando ficha...`,
             "info"
           );
           await loadFromFirestore(targetUid || user.uid);
+          if (isCurrentUserAdmin()) {
+            startRealtimeCampaignMonitor();
+          }
           if (isMasterAdmin() && targetUid !== ADMIN_UID) {
             try {
               const masterSnap = await firestoreMod.getDoc(
@@ -3904,12 +4724,19 @@ async function loadFromFirestore(uid) {
     if (snap.exists()) {
       const cloudData = snap.data();
       applySheetData(cloudData, uid);
-      if (!isMasterAdmin() || uid === state.user?.uid) {
+      if (cloudData && cloudData.fields && typeof cloudData.fields === "object") {
+        const snapCopy = createSafeRecord();
+        Object.entries(cloudData.fields).forEach(([k, v]) => {
+          if (isValidFieldKey(k)) snapCopy[k] = v;
+        });
+        state.lastObservedByUid[uid] = snapCopy;
+      }
+      if (!isCurrentUserAdmin() || uid === state.user?.uid) {
         saveLocalData(cloudData);
       }
       setStatusBanner(
-        isMasterAdmin() && uid !== state.user?.uid
-          ? `Ficha carregada do UID alvo (${uid}).`
+        isCurrentUserAdmin() && uid !== state.user?.uid
+          ? `Ficha carregada do UID alvo (${uid}) com auditoria ativa.`
           : hasActiveTempAdminRole()
             ? "Ficha carregada (Admin Temporário ativo, ficha master privada)."
             : "Ficha carregada do banco de dados Firebase.",
@@ -3918,6 +4745,7 @@ async function loadFromFirestore(uid) {
     } else {
       state.activeNotice = null;
       state.tempAdminGrant = null;
+      state.activeAuditHistory = [];
       if (uid === ADMIN_UID && !state.masterUpdateNotice) state.masterUpdateNotice = null;
       scheduleNoticeExpiryCheck();
       scheduleTempAdminExpiryCheck();
@@ -3929,12 +4757,12 @@ async function loadFromFirestore(uid) {
       captureBaselineFields(initialData.fields);
       state.lastSavedSnapshot = computeFieldsSnapshot(initialData.fields);
       state.lastCloudWriteAt = Date.now();
-      if (!isMasterAdmin() || uid === state.user?.uid) {
+      if (!isCurrentUserAdmin() || uid === state.user?.uid) {
         saveLocalData(initialData);
       }
       updateAdminBarUI();
       setStatusBanner(
-        isMasterAdmin() && uid !== state.user?.uid
+        isCurrentUserAdmin() && uid !== state.user?.uid
           ? `Nova ficha criada para o UID alvo (${uid}).`
           : "Nova ficha criada na sua conta do Firebase.",
         "success"
@@ -3984,7 +4812,7 @@ async function handleClearSheetData(event) {
     return;
   }
 
-  const isRemoteTarget = Boolean(isMasterAdmin() && targetUid && targetUid !== state.user?.uid);
+  const isRemoteTarget = Boolean(isCurrentUserAdmin() && targetUid && targetUid !== state.user?.uid);
 
   state.activeNotice = null;
   scheduleNoticeExpiryCheck();
@@ -4068,6 +4896,7 @@ async function handleAuthSubmit(event) {
 
 async function handleLogout(event) {
   if (event && event.isTrusted === false) return;
+  stopRealtimeCampaignMonitor();
   state.offlineMode = false;
   state.adminTargetUid = "";
   state.adminDraftUid = "";
@@ -4080,6 +4909,7 @@ async function handleLogout(event) {
   state.activeNotice = null;
   state.globalNotice = null;
   state.tempAdminGrant = null;
+  state.activeAuditHistory = [];
   state.masterUpdateNotice = null;
   state.masterReleaseNotice = null;
   state.autoSyncDoneForSession = false;
@@ -4123,6 +4953,7 @@ async function handleDeleteAccount(event) {
       await deleteDoc(doc(state.db, FIRESTORE_COLLECTION, uid));
     }
 
+    stopRealtimeCampaignMonitor();
     await deleteUser(currentUser);
     clearLocalData();
     clearAuthSensitiveInputs();
@@ -4138,6 +4969,7 @@ async function handleDeleteAccount(event) {
     state.activeNotice = null;
     state.globalNotice = null;
     state.tempAdminGrant = null;
+    state.activeAuditHistory = [];
     state.masterUpdateNotice = null;
     state.masterReleaseNotice = null;
     state.autoSyncDoneForSession = false;
@@ -4165,7 +4997,7 @@ async function handleDeleteAccount(event) {
 }
 
 /* --------------------------------------------------------------------------
-   Salvamento da Ficha (com proteção contra gravação redundante, inspeção e spam)
+   Salvamento da Ficha (com auditoria, proteção contra inspeção e anti-spam)
    -------------------------------------------------------------------------- */
 async function persistSheet(forceWrite = false, masterSummaryLabel = "") {
   if (state.isSaving || state.isDeleting) return;
@@ -4196,7 +5028,7 @@ async function persistSheet(forceWrite = false, masterSummaryLabel = "") {
       return;
     }
 
-    const isRemoteTarget = Boolean(isMasterAdmin() && targetUid && targetUid !== state.user?.uid);
+    const isRemoteTarget = Boolean(isCurrentUserAdmin() && targetUid && targetUid !== state.user?.uid);
 
     if (!isRemoteTarget) {
       saveLocalData(payload);
@@ -4211,9 +5043,14 @@ async function persistSheet(forceWrite = false, masterSummaryLabel = "") {
 
       const cloudPayload = buildSanitizedCloudPayload();
       await saveToFirestore(targetUid, cloudPayload);
+      state.activeAuditHistory = parseAuditHistoryFromFields(cloudPayload.fields);
       captureBaselineFields(cloudPayload.fields);
       state.lastSavedSnapshot = computeFieldsSnapshot(cloudPayload.fields);
       syncAdminQuickInputsFromSheet();
+
+      if (state.adminActiveCommand === "/auditoria") {
+        renderAdminCommandFunctionsBelow();
+      }
 
       if (isMasterAdmin() && masterSummaryLabel) {
         await recordMasterSuccessUpdate(masterSummaryLabel);
@@ -4226,6 +5063,7 @@ async function persistSheet(forceWrite = false, masterSummaryLabel = "") {
         "success"
       );
     } else if (hasCookieConsent()) {
+      state.activeAuditHistory = parseAuditHistoryFromFields(payload.fields);
       captureBaselineFields(payload.fields);
       state.lastSavedSnapshot = currentSnapshot;
       setStatusBanner("Alterações salvas localmente.", "info");
@@ -4461,9 +5299,7 @@ function bindEvents() {
   }
 
   if (deleteCancelBtn && deleteConfirmBox) {
-    deleteCancelBtn.addEventListener("click", () => {
-      deleteConfirmBox.hidden = true;
-    });
+    deleteConfirmBox.hidden = true;
   }
 
   if (deleteConfirmBtn) {
