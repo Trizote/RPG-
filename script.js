@@ -248,9 +248,6 @@ const state = {
   }
 };
 
-/* --------------------------------------------------------------------------
-   Defesa contra Prototype Pollution, XSS, Faixa Inválida e Console Guard
-   -------------------------------------------------------------------------- */
 function isForbiddenKey(key) {
   return typeof key !== "string" || FORBIDDEN_KEYS.includes(key.toLowerCase());
 }
@@ -359,7 +356,7 @@ function initConsoleSecurityGuard() {
 }
 
 /* --------------------------------------------------------------------------
-   2. Mecânicas de Nen Interativas: Hexágono Visual + Catálogo de Habilidades
+   Mecânicas de Nen Interativas: Hexágono Visual + Catálogo de Habilidades
    -------------------------------------------------------------------------- */
 function computeNenEfficiencyMap(mainCategoryKey) {
   const result = createSafeRecord();
@@ -596,7 +593,7 @@ function handleAddNenAbility() {
 }
 
 /* --------------------------------------------------------------------------
-   3. Automação e QoL: Status Automáticos + Alerta de Sobrecarga + JSON/PDF
+   Automação e QoL: Status Automáticos + Alerta de Sobrecarga + JSON/PDF
    -------------------------------------------------------------------------- */
 function recalculateAutoStatusValues() {
   const autoCheck = document.getElementById("auto-calc-status");
@@ -729,7 +726,7 @@ function handleUserImportJsonFile(event) {
 }
 
 /* --------------------------------------------------------------------------
-   4. Recursos para Aba Guilda (Loja/Banco) e Múltiplas Fichas por Conta
+   Recursos para Aba Guilda (Loja/Banco) e Múltiplas Fichas por Conta
    -------------------------------------------------------------------------- */
 function renderGuildShopCatalog() {
   const listEl = document.getElementById("guilda-loja-lista");
@@ -3621,19 +3618,54 @@ function bindUIEvents() {
     });
   });
 
-  const addHabBtn = document.getElementById("btn-add-habilidade-nen");
+  const addHabBtn = document.getElementById("btn-adicionar-habilidade");
   if (addHabBtn) {
     addHabBtn.addEventListener("click", handleAddNenAbility);
   }
 
-  const exportJsonBtn = document.getElementById("btn-exportar-json");
+  const exportJsonBtn = document.getElementById("btn-exportar-json-usuario");
   if (exportJsonBtn) {
     exportJsonBtn.addEventListener("click", handleUserExportJson);
   }
 
-  const importJsonInput = document.getElementById("input-importar-json");
+  const printPdfBtn = document.getElementById("btn-imprimir-ficha-pdf");
+  if (printPdfBtn) {
+    printPdfBtn.addEventListener("click", () => {
+      window.print();
+    });
+  }
+
+  const autoCalcCheck = document.getElementById("auto-calc-status");
+  if (autoCalcCheck) {
+    autoCalcCheck.addEventListener("change", () => {
+      recalculateSkillsTable();
+      scheduleAutoSave();
+    });
+  }
+
+  const spendGuildBtn = document.getElementById("btn-guilda-gastar-moedas");
+  if (spendGuildBtn) {
+    spendGuildBtn.addEventListener("click", () => {
+      const valEl = document.getElementById("guilda-gasto-valor");
+      const reasonEl = document.getElementById("guilda-gasto-motivo");
+      const amount = Math.max(1, Math.trunc(Number(valEl ? valEl.value : 0) || 0));
+      const reason = sanitizeSingleLine(reasonEl ? reasonEl.value : "", 80) || "Gasto na Guilda";
+      if (spendGuildCoins(amount, reason)) {
+        if (reasonEl) reasonEl.value = "";
+      }
+    });
+  }
+
+  const importJsonInput = document.getElementById("input-arquivo-json-usuario");
   if (importJsonInput) {
     importJsonInput.addEventListener("change", handleUserImportJsonFile);
+  }
+
+  const importJsonBtn = document.getElementById("btn-importar-json-usuario");
+  if (importJsonBtn && importJsonInput) {
+    importJsonBtn.addEventListener("click", () => {
+      importJsonInput.click();
+    });
   }
 
   const slotSelect = document.getElementById("ficha-slot-select");
@@ -3641,12 +3673,12 @@ function bindUIEvents() {
     slotSelect.addEventListener("change", (e) => handleSwitchAccountSlot(e.target.value));
   }
 
-  const newSlotBtn = document.getElementById("btn-nova-ficha-slot");
+  const newSlotBtn = document.getElementById("btn-novo-slot-ficha");
   if (newSlotBtn) {
     newSlotBtn.addEventListener("click", handleCreateNewAccountSlot);
   }
 
-  const delSlotBtn = document.getElementById("btn-excluir-ficha-slot");
+  const delSlotBtn = document.getElementById("btn-excluir-slot-ficha");
   if (delSlotBtn) {
     delSlotBtn.addEventListener("click", handleDeleteCurrentAccountSlot);
   }
