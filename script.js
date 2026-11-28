@@ -846,12 +846,13 @@ function handleUserImportJsonFile(event) {
       Object.entries(parsed.fields).slice(0, 1500).forEach(([k, v]) => {
         if (!isValidFieldKey(k) || k === ADMIN_NOTICE_FIELD_KEY || k === MULTI_SLOTS_FIELD_KEY) return;
         if (typeof v === "boolean") safeFields[k] = v;
-        else if (typeof v === "string" || typeof v === "number") safeFields[k] = String(v).slice(0, 10000);
+        else if (typeof v === "string" || typeof v === "number") safeFields[k] = String(v).slice(0, 30000);
       });
 
+      resetSheetFieldsToDefault();
       applySheetData({ fields: safeFields }, true);
       saveCurrentFormIntoActiveSlotMemory();
-      setStatusBanner("Ficha importada com sucesso a partir do arquivo JSON.", "success");
+      setStatusBanner("Ficha anterior substituída e novos dados importados com sucesso.", "success");
       await persistSheet(true);
     } catch {
       setStatusBanner("Erro ao ler o arquivo JSON selecionado.", "error");
@@ -2223,12 +2224,13 @@ async function handleAdminImportJson(rawJsonText) {
     Object.entries(parsed.fields).slice(0, 1500).forEach(([k, v]) => {
       if (!isValidFieldKey(k)) return;
       if (typeof v === "boolean") safeFields[k] = v;
-      else if (typeof v === "string" || typeof v === "number") safeFields[k] = String(v).slice(0, 10000);
+      else if (typeof v === "string" || typeof v === "number") safeFields[k] = String(v).slice(0, 30000);
     });
 
+    resetSheetFieldsToDefault();
     applySheetData({ fields: safeFields }, true);
     saveCurrentFormIntoActiveSlotMemory();
-    appendAdminLog(`JSON importado para UID ${getActiveTargetUid()}`);
+    appendAdminLog(`JSON importado e ficha substituída para UID ${getActiveTargetUid()}`);
     await persistSheet(true);
   } catch {
     setStatusBanner("Erro ao ler o JSON colado. Verifique a sintaxe.", "error");
